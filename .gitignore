@@ -1,0 +1,4 @@
+node_modules/
+scripts/.dev-mock-data.json
+.DS_Store
+Thumbs.db

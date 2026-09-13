@@ -1,0 +1,13 @@
+{
+  "name": "build-games-script",
+  "private": true,
+  "type": "module",
+  "description": "只在本機執行的 BGG 抓取腳本，不進 Vercel 部署（見 .vercelignore）。",
+  "scripts": {
+    "build": "node build-games.mjs"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5",
+    "fast-xml-parser": "^4.5.0"
+  }
+}
