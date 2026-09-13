@@ -22,6 +22,7 @@ const SHEETS = {
   members: 'members',
   venues: 'venues',
   collections: 'collections',
+  games: 'games',
   events: 'events',
   slots: 'slots',
   votes: 'votes',
@@ -41,22 +42,13 @@ function doGet(e) {
 
 function doPost(e) {
   let payload;
-  let raw;
   try {
     // 不要用 e.postData.contents：Apps Script 對 text/plain 的自動解碼常常
     // 把多位元組的 UTF-8（中文）字元讀壞成亂碼，要透過 Blob 明確指定 UTF-8 解碼。
-    raw = e.postData.getBlob().getDataAsString('UTF-8');
+    const raw = e.postData.getBlob().getDataAsString('UTF-8');
     payload = JSON.parse(raw);
   } catch (err) {
-    // 暫時診斷用：把收到的原始內容跟錯誤訊息一起回傳，方便排查編碼問題。
-    return jsonOutput({
-      ok: false,
-      error: 'BAD_REQUEST',
-      debug_raw: raw,
-      debug_rawCharCodes: raw ? raw.slice(0, 40).split('').map((c) => c.charCodeAt(0)) : null,
-      debug_postDataType: e.postData ? e.postData.type : null,
-      debug_errMessage: String(err && err.message || err),
-    });
+    return jsonOutput({ ok: false, error: 'BAD_REQUEST' });
   }
 
   try {
@@ -89,13 +81,7 @@ function doPost(e) {
         return jsonOutput(cancelEvent(payload));
       }
       default:
-        // 暫時診斷用：把實際解析出來的 payload 一起回傳。
-        return jsonOutput({
-          ok: false,
-          error: 'UNKNOWN_ACTION',
-          debug_payload: payload,
-          debug_actionCharCodes: String(payload.action || '').split('').map((c) => c.charCodeAt(0)),
-        });
+        return jsonOutput({ ok: false, error: 'UNKNOWN_ACTION' });
     }
   } catch (err) {
     return jsonOutput({ ok: false, error: String(err && err.message || err) });
@@ -129,15 +115,18 @@ function jsonOutput(obj) {
 }
 
 // ---------------------------------------------------------------------------
-// 一次性初始化：在 Apps Script 編輯器選這個函式後按「執行」，自動建立七個
-// 分頁與表頭列。只需要跑一次。已經存在的分頁不會被清空或刪除，只會確保表頭
-// 列是正確的（不小心跑第二次也沒關係）。
+// 一次性初始化：在 Apps Script 編輯器選這個函式後按「執行」，自動建立所有
+// 分頁與表頭列。可以重複執行，已經存在的分頁不會被清空或刪除，只會確保表頭
+// 列是正確的（例如把 venues 的 holder_id 表頭改名成 unlock_member_ids）。
 // ---------------------------------------------------------------------------
 function setupSheets() {
   const headers = {
     members: ['id', 'name', 'type', 'active', 'password'],
-    venues: ['id', 'name', 'holder_id', 'note', 'active'],
+    venues: ['id', 'name', 'unlock_member_ids', 'note', 'active'],
     collections: ['holder_id', 'bgg_id', 'name_zh', 'note'],
+    games: ['bgg_id', 'name_zh', 'name_en', 'thumbnail', 'min_players', 'max_players',
+      'playing_time', 'min_playtime', 'max_playtime', 'weight', 'year',
+      'category', 'is_expansion', 'parent_bgg_id'],
     events: ['event_id', 'created_at', 'creator_id', 'title', 'status', 'venue_id', 'venue_free_text', 'confirmed_slot_id', 'game_bgg_ids', 'note'],
     slots: ['slot_id', 'event_id', 'date', 'period', 'label'],
     votes: ['event_id', 'slot_id', 'member_id', 'ok', 'updated_at'],
@@ -154,7 +143,7 @@ function setupSheets() {
     range.setFontWeight('bold');
   });
 
-  Logger.log('七個分頁與表頭已建立/更新完成：' + Object.keys(headers).join('、'));
+  Logger.log('分頁與表頭已建立/更新完成：' + Object.keys(headers).join('、'));
 }
 
 // ---------------------------------------------------------------------------
@@ -257,6 +246,7 @@ function bootstrap() {
     members: readAll(SHEETS.members).map(stripPassword),
     venues: readAll(SHEETS.venues),
     collections: readAll(SHEETS.collections),
+    games: readAll(SHEETS.games),
     events: readAll(SHEETS.events),
     slots: readAll(SHEETS.slots),
     votes: readAll(SHEETS.votes),

@@ -1,17 +1,14 @@
 // 可玩清單計算、篩選、已結束判定、分類代碼表。
-import { store, allOwnerships, getGameMeta, holderName, venueById, activeVenues, signupsOfEvent } from './store.js';
+import { store, allOwnerships, getGameMeta, holderName, venueById, signupsOfEvent } from './store.js';
 
-// §3.3 可玩清單 = (所有已報名玩家各自的收藏) ∪ (該場地持有者的收藏)
+// §3.3 可玩清單 = (所有已報名玩家各自的收藏) ∪ (該場地自己的收藏)
 export function computePlayableList(event) {
   const holderIds = new Set();
   let venueHolderId = null;
 
   if (event.venue_id) {
-    const venue = venueById(event.venue_id);
-    if (venue) {
-      venueHolderId = venue.holder_id;
-      holderIds.add(venue.holder_id);
-    }
+    venueHolderId = event.venue_id;
+    holderIds.add(event.venue_id);
   }
 
   const signups = signupsOfEvent(event.event_id);
@@ -113,7 +110,7 @@ export function allGamesWithHolders() {
   return result.sort((a, b) => (a.meta.name_zh || '').localeCompare(b.meta.name_zh || '', 'zh-Hant'));
 }
 
-// 反查用：某款遊戲目前在哪些持有者手上，以及該持有者對應的場地（若有）。
+// 反查用：某款遊戲目前在哪些持有者手上（人／群體，或是場地自己）。
 export function ownersOf(bggId) {
   const id = Number(bggId);
   const ownerships = allOwnerships().filter((o) => o.bgg_id === id);
@@ -121,8 +118,20 @@ export function ownersOf(bggId) {
   return holderIds.map((holderId) => ({
     holderId,
     name: holderName(holderId),
-    venues: activeVenues().filter((v) => v.holder_id === holderId).map((v) => v.name),
+    isVenue: !!venueById(holderId),
   }));
+}
+
+// 場地「誰能開」名單：unlock_member_ids 逗號分隔，空白＝誰都能選。
+// 只是前端提醒用，不做任何攔截。
+export function venueUnlockIds(venue) {
+  return String(venue.unlock_member_ids || '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+export function venueQualifies(venue, participantIds) {
+  const list = venueUnlockIds(venue);
+  if (list.length === 0) return true;
+  return participantIds.some((id) => list.includes(id));
 }
 
 // §6.5 已結束判定

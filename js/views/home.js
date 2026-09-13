@@ -12,7 +12,7 @@ function venueLabel(event) {
 }
 
 function gamesLabel(event) {
-  const ids = (event.game_bgg_ids || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const ids = String(event.game_bgg_ids || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (ids.length === 0) return '';
   return ids.map((id) => getGameMeta(id).name_zh).join('、');
 }

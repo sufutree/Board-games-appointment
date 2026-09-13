@@ -1,10 +1,10 @@
 import { activeMembers, activeVenues, reloadDynamic } from '../store.js';
-import { allGamesWithHolders } from '../rules.js';
+import { allGamesWithHolders, venueQualifies } from '../rules.js';
 import { writeAction } from '../api.js';
 import { escapeHtml, showToast } from '../app.js';
 
 const MAX_SLOTS = 4;
-const MIN_SLOTS = 2;
+const MIN_SLOTS = 1;
 
 export async function renderNewEvent(appEl) {
   const members = activeMembers();
@@ -12,7 +12,6 @@ export async function renderNewEvent(appEl) {
 
   const state = {
     slots: [
-      { date: '', period: 'afternoon' },
       { date: '', period: 'afternoon' },
     ],
     selectedGames: [],
@@ -47,6 +46,7 @@ export async function renderNewEvent(appEl) {
           <option value="__other__">其他（自行輸入）</option>
         </select>
         <input class="form-control" id="f-venue-text" placeholder="輸入地點名稱" style="margin-top:8px; display:none;">
+        <p id="venue-warning" class="error-text" hidden></p>
       </div>
 
       <div class="form-group">
@@ -69,8 +69,10 @@ export async function renderNewEvent(appEl) {
 
   const slotRowsEl = document.getElementById('slot-rows');
   const addSlotBtn = document.getElementById('add-slot');
+  const creatorSelect = document.getElementById('f-creator');
   const venueSelect = document.getElementById('f-venue');
   const venueTextInput = document.getElementById('f-venue-text');
+  const venueWarningEl = document.getElementById('venue-warning');
   const gameSearchInput = document.getElementById('f-game-search');
   const gamePickerResults = document.getElementById('game-picker-results');
   const selectedGamesEl = document.getElementById('selected-games');
@@ -124,7 +126,20 @@ export async function renderNewEvent(appEl) {
 
   venueSelect.addEventListener('change', () => {
     venueTextInput.style.display = venueSelect.value === '__other__' ? '' : 'none';
+    updateVenueWarning();
   });
+  creatorSelect.addEventListener('change', updateVenueWarning);
+
+  function updateVenueWarning() {
+    const venue = venues.find((v) => v.id === venueSelect.value);
+    if (!venue || !creatorSelect.value || venueQualifies(venue, [creatorSelect.value])) {
+      venueWarningEl.hidden = true;
+      return;
+    }
+    venueWarningEl.textContent = '⚠️ 發起人目前不在這個場地的開放名單內，仍可送出。';
+    venueWarningEl.hidden = false;
+  }
+  updateVenueWarning();
 
   function renderSelectedGames() {
     selectedGamesEl.innerHTML = state.selectedGames.map((g) => `

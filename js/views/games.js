@@ -146,7 +146,7 @@ export async function renderGames(appEl) {
           <dt>複雜度</dt><dd>${formatWeight(meta)}</dd>
           <dt>分類</dt><dd>${meta.category ? escapeHtml(CATEGORY_LABELS[meta.category] || meta.category) : '－'}</dd>
           <dt>在哪裡／誰手上</dt>
-          <dd>${owners.length === 0 ? '目前沒有人登記持有。' : owners.map((o) => o.venues.length ? `${escapeHtml(o.venues.join('、'))}（${escapeHtml(o.name)}）` : escapeHtml(o.name)).join('、')}</dd>
+          <dd>${owners.length === 0 ? '目前沒有人登記持有。' : owners.map((o) => o.isVenue ? `📍${escapeHtml(o.name)}` : escapeHtml(o.name)).join('、')}</dd>
         </dl>
         ${expansions.length > 0 ? `
           <div class="section-title" style="margin-top:16px;">擴充</div>

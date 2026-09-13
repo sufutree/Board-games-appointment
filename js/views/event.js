@@ -4,20 +4,15 @@ import {
 } from '../store.js';
 import {
   computePlayableList, filterGames, formatSlotLabel,
-  formatPlayers, formatDuration, formatWeight,
+  formatPlayers, formatDuration, formatWeight, venueQualifies,
 } from '../rules.js';
-import { writeAction, promptPassword, getStoredIdentity, setStoredIdentity, clearStoredIdentity } from '../api.js';
+import { writeAction, promptPassword, getSelfId, setSelfId, clearSelfId, rememberSecret } from '../api.js';
 import { escapeHtml, showToast } from '../app.js';
 
 const STATUS_LABEL = { open: '投票中', confirmed: '已定案', cancelled: '已取消' };
 
 function isTrue(v) {
   return v === true || v === 'TRUE' || v === 'true' || v === 1;
-}
-
-function getSelfId() {
-  const identity = getStoredIdentity();
-  return identity ? identity.member_id : '';
 }
 
 function slotLabel(slot) {
@@ -107,7 +102,7 @@ export async function renderEvent(appEl, eventId) {
       `;
       document.getElementById('not-me-link').addEventListener('click', (e) => {
         e.preventDefault();
-        clearStoredIdentity();
+        clearSelfId();
         rerender();
       });
     } else {
@@ -124,7 +119,8 @@ export async function renderEvent(appEl, eventId) {
           const member = memberById(btn.dataset.memberId);
           const password = await promptPassword(member ? member.name : btn.dataset.memberId, false);
           if (password == null) return; // 使用者取消，留在選擇畫面
-          setStoredIdentity(btn.dataset.memberId, password);
+          setSelfId(btn.dataset.memberId);
+          rememberSecret(btn.dataset.memberId, password);
           rerender();
         });
       });
@@ -244,6 +240,7 @@ export async function renderEvent(appEl, eventId) {
             <option value="__other__">其他（自行輸入）</option>
           </select>
           <input class="form-control" id="confirm-venue-text" placeholder="輸入地點名稱" style="margin-top:8px; display:none;">
+          <p id="confirm-venue-warning" class="error-text" hidden></p>
         </div>
       `}
       <p class="form-hint">定案後會把投「可以」的人自動加入報名名單。</p>
@@ -254,9 +251,34 @@ export async function renderEvent(appEl, eventId) {
     if (!venueAlreadySet) {
       const venueSel = document.getElementById('confirm-venue');
       const venueText = document.getElementById('confirm-venue-text');
+      const venueWarningEl = document.getElementById('confirm-venue-warning');
+
+      function updateVenueWarning() {
+        const venue = activeVenues().find((v) => v.id === venueSel.value);
+        if (!venue) {
+          venueWarningEl.hidden = true;
+          return;
+        }
+        const checked = el.querySelector('input[name="confirm-slot"]:checked');
+        const okVoterIds = checked
+          ? votes.filter((v) => v.slot_id === checked.value && isTrue(v.ok)).map((v) => v.member_id)
+          : [];
+        if (venueQualifies(venue, okVoterIds)) {
+          venueWarningEl.hidden = true;
+          return;
+        }
+        venueWarningEl.textContent = '⚠️ 目前投「可以」的人裡沒有人在這個場地的開放名單內，仍可定案。';
+        venueWarningEl.hidden = false;
+      }
+
       venueSel.addEventListener('change', () => {
         venueText.style.display = venueSel.value === '__other__' ? '' : 'none';
+        updateVenueWarning();
       });
+      el.querySelectorAll('input[name="confirm-slot"]').forEach((radio) => {
+        radio.addEventListener('change', updateVenueWarning);
+      });
+      updateVenueWarning();
     }
 
     document.getElementById('confirm-btn').addEventListener('click', async () => {
@@ -365,7 +387,7 @@ export async function renderEvent(appEl, eventId) {
   function renderPlayableSection() {
     const el = document.getElementById('playable-section');
     const rawList = computePlayableList(event);
-    const pinnedIds = new Set((event.game_bgg_ids || '').split(',').map((s) => Number(s.trim())).filter(Boolean));
+    const pinnedIds = new Set(String(event.game_bgg_ids || '').split(',').map((s) => Number(s.trim())).filter(Boolean));
 
     el.innerHTML = `
       <div class="filter-bar">

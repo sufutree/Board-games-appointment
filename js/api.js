@@ -9,28 +9,67 @@ export const APPS_SCRIPT_URL = devApiOverride || DEFAULT_APPS_SCRIPT_URL;
 // 權限模型：每個成員有自己的密碼（存在 Sheets members 分頁的 password 欄），
 // 只有 Sufu 知道的主密碼（固定值，見 apps-script/Code.gs 的 MASTER_PASSWORD）可以做任何人的任何動作。
 // 每個寫入動作都對應一個「本人」member_id：投票/報名是操作者自己，開團/定案/取消是發起人。
-// 「點自己的名字」選定身分時順便記住那個人的密碼，之後同一身分的動作就不用再問。
-const IDENTITY_KEY = 'bgt_identity'; // { member_id, secret }
+//
+// 「我是誰」（畫面顯示用）跟「密碼快取」是兩件分開的事：
+// - SELF_ID_KEY 只存目前選定顯示用的 member id。
+// - KNOWN_SECRETS_KEY 存這台裝置上「曾經驗證成功過」的每一個人的密碼，不限於目前選定的自己。
+//   任何一個動作只要曾經對某個 member_id 輸對過密碼，之後不管是誰在畫面上被選為「自己」，
+//   只要動作需要那個 member_id 的密碼，都不會再問一次。
+const SELF_ID_KEY = 'bgt_self_id';
+const KNOWN_SECRETS_KEY = 'bgt_known_secrets'; // { [member_id]: secret }
 
-export function getStoredIdentity() {
+export function getSelfId() {
   try {
-    return JSON.parse(localStorage.getItem(IDENTITY_KEY) || 'null');
+    return localStorage.getItem(SELF_ID_KEY) || '';
   } catch {
-    return null;
+    return '';
   }
 }
 
-export function setStoredIdentity(memberId, secret) {
+export function setSelfId(memberId) {
   try {
-    localStorage.setItem(IDENTITY_KEY, JSON.stringify({ member_id: memberId, secret }));
+    localStorage.setItem(SELF_ID_KEY, memberId);
   } catch {
     // localStorage 不可用時忽略，之後的動作會改成每次詢問密碼。
   }
 }
 
-export function clearStoredIdentity() {
+export function clearSelfId() {
   try {
-    localStorage.removeItem(IDENTITY_KEY);
+    localStorage.removeItem(SELF_ID_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function getKnownSecrets() {
+  try {
+    return JSON.parse(localStorage.getItem(KNOWN_SECRETS_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+export function getKnownSecret(memberId) {
+  const secrets = getKnownSecrets();
+  return Object.prototype.hasOwnProperty.call(secrets, memberId) ? secrets[memberId] : null;
+}
+
+export function rememberSecret(memberId, secret) {
+  try {
+    const secrets = getKnownSecrets();
+    secrets[memberId] = secret;
+    localStorage.setItem(KNOWN_SECRETS_KEY, JSON.stringify(secrets));
+  } catch {
+    // ignore
+  }
+}
+
+export function forgetSecret(memberId) {
+  try {
+    const secrets = getKnownSecrets();
+    delete secrets[memberId];
+    localStorage.setItem(KNOWN_SECRETS_KEY, JSON.stringify(secrets));
   } catch {
     // ignore
   }
@@ -90,11 +129,9 @@ export async function bootstrap() {
 // 執行一個需要密碼的寫入動作。payload 不含 action/secret，由這裡補上。
 // requiredMemberId：這個動作「本人」是誰（投票者、報名/退出者、發起人…）。
 // memberLabel：該成員的顯示名稱，用在密碼輸入框的提示文字。
-// 如果目前記住的身分剛好就是 requiredMemberId，直接用快取的密碼，不用再問一次。
+// 只要 requiredMemberId 這個人之前在這台裝置上輸對過密碼，就直接用快取的密碼，不用再問。
 export async function writeAction(action, payload, requiredMemberId, memberLabel) {
-  const identity = getStoredIdentity();
-  const usingCache = !!identity && identity.member_id === requiredMemberId;
-  let secret = usingCache ? identity.secret : null;
+  let secret = getKnownSecret(requiredMemberId);
 
   if (secret == null) {
     secret = await promptPassword(memberLabel, false);
@@ -104,15 +141,13 @@ export async function writeAction(action, payload, requiredMemberId, memberLabel
   let result = await postOnce(action, payload, secret);
 
   if (!result.ok && result.error === 'BAD_SECRET') {
-    if (usingCache) clearStoredIdentity();
+    forgetSecret(requiredMemberId);
     secret = await promptPassword(memberLabel, true);
     if (secret == null) return { ok: false, error: 'CANCELLED' };
     result = await postOnce(action, payload, secret);
-    if (result.ok && usingCache) {
-      // 這是本人的動作，重新記住修正後的密碼。
-      setStoredIdentity(requiredMemberId, secret);
-    }
   }
+
+  if (result.ok) rememberSecret(requiredMemberId, secret);
 
   return result;
 }
