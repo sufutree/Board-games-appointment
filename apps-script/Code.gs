@@ -13,7 +13,7 @@
  *   - MASTER_PASSWORD 是只有 Sufu 知道的主密碼，可以做任何人的任何動作。是刻意
  *     固定寫在這裡（不放指令碼屬性），所以修改密碼要直接改這個檔案再重新部署。
  *   - 每個寫入動作都對應一個「本人」member_id：投票/報名退出是操作者自己，
- *     開團/定案/取消是該團的發起人 creator_id。
+ *     開團/定案/取消/編輯地點與指定遊戲是該團的發起人 creator_id。
  */
 
 const MASTER_PASSWORD = 'sufutree';
@@ -72,11 +72,11 @@ function doPost(e) {
       case 'toggleSignup':
         if (!checkAuth(payload.member_id, payload.secret)) return jsonOutput({ ok: false, error: 'BAD_SECRET' });
         return jsonOutput(toggleSignup(payload));
-      case 'updateGames': {
+      case 'updateEventDetails': {
         const ev = findEvent(payload.event_id);
         if (!ev) return jsonOutput({ ok: false, error: 'EVENT_NOT_FOUND' });
         if (!checkAuth(ev.creator_id, payload.secret)) return jsonOutput({ ok: false, error: 'BAD_SECRET' });
-        return jsonOutput(updateGames(payload));
+        return jsonOutput(updateEventDetails(payload));
       }
       case 'cancelEvent': {
         const ev = findEvent(payload.event_id);
@@ -354,11 +354,23 @@ function toggleSignup(payload) {
   return { ok: true };
 }
 
-function updateGames(payload) {
-  const { event_id, game_bgg_ids } = payload;
+// 成團後發起人仍可調整指定遊戲與地點。
+function updateEventDetails(payload) {
+  const { event_id, game_bgg_ids, venue_id, venue_free_text } = payload;
   const idx = findRowIndex(SHEETS.events, (row) => row.event_id === event_id);
   if (idx === -1) throw new Error('EVENT_NOT_FOUND');
-  updateRowByIndex(SHEETS.events, idx, { game_bgg_ids: (game_bgg_ids || []).join(',') });
+  const updates = { game_bgg_ids: (game_bgg_ids || []).join(',') };
+  if (venue_id) {
+    updates.venue_id = venue_id;
+    updates.venue_free_text = '';
+  } else if (venue_free_text) {
+    updates.venue_free_text = venue_free_text;
+    updates.venue_id = '';
+  } else {
+    updates.venue_id = '';
+    updates.venue_free_text = '';
+  }
+  updateRowByIndex(SHEETS.events, idx, updates);
   return { ok: true };
 }
 

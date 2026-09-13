@@ -1,9 +1,9 @@
 import {
   eventById, slotsOfEvent, votesOfEvent, signupsOfEvent,
-  activeMembers, memberById, venueById, activeVenues, reloadDynamic,
+  activeMembers, memberById, venueById, activeVenues, reloadDynamic, getGameMeta,
 } from '../store.js';
 import {
-  computePlayableList, filterGames, formatSlotLabel,
+  computePlayableList, filterGames, formatSlotLabel, allGamesWithHolders,
   formatPlayers, formatDuration, formatWeight, venueQualifies,
 } from '../rules.js';
 import { writeAction, promptPassword, getSelfId, setSelfId, clearSelfId, rememberSecret } from '../api.js';
@@ -17,6 +17,10 @@ function isTrue(v) {
 
 function slotLabel(slot) {
   return slot.label || formatSlotLabel(slot.date, slot.period);
+}
+
+function pinnedGameIds(event) {
+  return String(event.game_bgg_ids || '').split(',').map((s) => Number(s.trim())).filter(Boolean);
 }
 
 function venueDisplay(event) {
@@ -72,6 +76,9 @@ export async function renderEvent(appEl, eventId) {
     ` : ''}
 
     ${event.status === 'confirmed' ? `
+      <div class="section-title">地點與指定遊戲</div>
+      <div id="edit-details-section" class="card"></div>
+
       <div class="section-title">報名名單</div>
       <div id="signup-section"></div>
     ` : ''}
@@ -85,7 +92,10 @@ export async function renderEvent(appEl, eventId) {
   renderIdentityBar();
   renderVoteSection();
   if (event.status === 'open') renderConfirmSection();
-  if (event.status === 'confirmed') renderSignupSection();
+  if (event.status === 'confirmed') {
+    renderEditDetailsSection();
+    renderSignupSection();
+  }
   renderPlayableSection();
   if (event.status !== 'cancelled') renderCancelControl();
 
@@ -383,13 +393,199 @@ export async function renderEvent(appEl, eventId) {
     rerender();
   }
 
+  // ---- 地點與指定遊戲（成團後發起人仍可調整） ----
+  function renderEditDetailsSection() {
+    const el = document.getElementById('edit-details-section');
+    let selectedGames = pinnedGameIds(event).map((id) => {
+      const meta = getGameMeta(id);
+      return { bggId: id, name: meta.name_zh || meta.name_en || String(id) };
+    });
+
+    function renderCollapsed() {
+      el.innerHTML = `
+        <p class="card-meta">地點：${escapeHtml(venueDisplay(event))}</p>
+        <p class="card-meta">指定遊戲：${selectedGames.length ? escapeHtml(selectedGames.map((g) => g.name).join('、')) : '未指定'}</p>
+        <button type="button" id="edit-details-btn" class="btn btn-sm">編輯地點與指定遊戲</button>
+      `;
+      document.getElementById('edit-details-btn').addEventListener('click', renderExpanded);
+    }
+
+    function renderExpanded() {
+      const isOtherVenue = !event.venue_id && !!event.venue_free_text;
+      el.innerHTML = `
+        <div class="form-group">
+          <label class="form-label" for="edit-venue">地點</label>
+          <select class="form-control" id="edit-venue">
+            <option value="">尚未決定</option>
+            ${activeVenues().map((v) => `<option value="${escapeHtml(v.id)}" ${event.venue_id === v.id ? 'selected' : ''}>${escapeHtml(v.name)}</option>`).join('')}
+            <option value="__other__" ${isOtherVenue ? 'selected' : ''}>其他（自行輸入）</option>
+          </select>
+          <input class="form-control" id="edit-venue-text" placeholder="輸入地點名稱" value="${escapeHtml(event.venue_free_text || '')}" style="margin-top:8px; display:${isOtherVenue ? '' : 'none'};">
+          <p id="edit-venue-warning" class="error-text" hidden></p>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="edit-game-search">指定遊戲</label>
+          <input class="form-control" id="edit-game-search" placeholder="搜尋遊戲名稱…" autocomplete="off">
+          <div id="edit-game-picker-results" class="game-picker-results" hidden></div>
+          <div id="edit-selected-games" class="selected-games"></div>
+        </div>
+        <p id="edit-details-error" class="error-text" hidden></p>
+        <div style="display:flex; gap:8px;">
+          <button type="button" id="edit-details-save" class="btn btn-primary btn-sm">儲存</button>
+          <button type="button" id="edit-details-cancel" class="btn btn-sm btn-ghost">取消</button>
+        </div>
+      `;
+
+      const venueSel = document.getElementById('edit-venue');
+      const venueText = document.getElementById('edit-venue-text');
+      const venueWarningEl = document.getElementById('edit-venue-warning');
+      const gameSearchInput = document.getElementById('edit-game-search');
+      const gamePickerResults = document.getElementById('edit-game-picker-results');
+      const selectedGamesEl = document.getElementById('edit-selected-games');
+
+      function updateVenueWarning() {
+        const venue = activeVenues().find((v) => v.id === venueSel.value);
+        if (!venue) {
+          venueWarningEl.hidden = true;
+          return;
+        }
+        const participantIds = signups.map((s) => s.member_id);
+        if (venueQualifies(venue, participantIds)) {
+          venueWarningEl.hidden = true;
+          return;
+        }
+        venueWarningEl.textContent = '⚠️ 目前報名的人裡沒有人在這個場地的開放名單內，仍可儲存。';
+        venueWarningEl.hidden = false;
+      }
+      venueSel.addEventListener('change', () => {
+        venueText.style.display = venueSel.value === '__other__' ? '' : 'none';
+        updateVenueWarning();
+      });
+      updateVenueWarning();
+
+      function renderSelectedGames() {
+        selectedGamesEl.innerHTML = selectedGames.map((g) => `
+          <span class="selected-game-chip" data-bgg-id="${g.bggId}">
+            ${escapeHtml(g.name)}
+            <button type="button" aria-label="移除">✕</button>
+          </span>
+        `).join('');
+      }
+      renderSelectedGames();
+
+      selectedGamesEl.addEventListener('click', (e) => {
+        if (e.target.tagName !== 'BUTTON') return;
+        const chip = e.target.closest('.selected-game-chip');
+        const bggId = Number(chip.dataset.bggId);
+        selectedGames = selectedGames.filter((g) => g.bggId !== bggId);
+        renderSelectedGames();
+      });
+
+      let allGames = null;
+      gameSearchInput.addEventListener('input', () => {
+        const kw = gameSearchInput.value.trim().toLowerCase();
+        if (!kw) {
+          gamePickerResults.hidden = true;
+          gamePickerResults.innerHTML = '';
+          return;
+        }
+        if (!allGames) allGames = allGamesWithHolders();
+        const selectedIds = new Set(selectedGames.map((g) => g.bggId));
+        const matches = allGames.filter((item) => {
+          if (selectedIds.has(item.bggId)) return false;
+          const hay = `${item.meta.name_zh || ''} ${item.meta.name_en || ''}`.toLowerCase();
+          return hay.includes(kw);
+        }).slice(0, 20);
+
+        if (matches.length === 0) {
+          gamePickerResults.hidden = false;
+          gamePickerResults.innerHTML = '<div class="game-picker-item">沒有符合的遊戲</div>';
+          return;
+        }
+
+        gamePickerResults.hidden = false;
+        gamePickerResults.innerHTML = matches.map((item) => `
+          <div class="game-picker-item" data-bgg-id="${item.bggId}">
+            ${item.meta.thumbnail ? `<img src="${escapeHtml(item.meta.thumbnail)}" alt="">` : ''}
+            <span>${escapeHtml(item.meta.name_zh || item.meta.name_en || String(item.bggId))}</span>
+          </div>
+        `).join('');
+      });
+
+      gamePickerResults.addEventListener('click', (e) => {
+        const row = e.target.closest('.game-picker-item');
+        if (!row || !row.dataset.bggId) return;
+        const bggId = Number(row.dataset.bggId);
+        const item = allGames.find((g) => g.bggId === bggId);
+        if (!item) return;
+        selectedGames.push({ bggId, name: item.meta.name_zh || item.meta.name_en || String(bggId) });
+        renderSelectedGames();
+        gameSearchInput.value = '';
+        gamePickerResults.hidden = true;
+        gamePickerResults.innerHTML = '';
+      });
+
+      document.getElementById('edit-details-cancel').addEventListener('click', () => {
+        selectedGames = pinnedGameIds(event).map((id) => {
+          const meta = getGameMeta(id);
+          return { bggId: id, name: meta.name_zh || meta.name_en || String(id) };
+        });
+        renderCollapsed();
+      });
+
+      document.getElementById('edit-details-save').addEventListener('click', async () => {
+        const errorEl = document.getElementById('edit-details-error');
+        errorEl.hidden = true;
+        const payload = {
+          event_id: event.event_id,
+          game_bgg_ids: selectedGames.map((g) => g.bggId),
+        };
+        if (venueSel.value === '__other__') {
+          const t = venueText.value.trim();
+          if (!t) {
+            errorEl.textContent = '請輸入地點名稱，或改選「尚未決定」。';
+            errorEl.hidden = false;
+            return;
+          }
+          payload.venue_free_text = t;
+        } else if (venueSel.value) {
+          payload.venue_id = venueSel.value;
+        }
+
+        const saveBtn = document.getElementById('edit-details-save');
+        saveBtn.disabled = true;
+        saveBtn.textContent = '儲存中…';
+        const result = await writeAction('updateEventDetails', payload, event.creator_id, creator ? creator.name : event.creator_id);
+        if (!result.ok) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = '儲存';
+          if (result.error !== 'CANCELLED') {
+            errorEl.textContent = `儲存失敗：${result.error}`;
+            errorEl.hidden = false;
+          }
+          return;
+        }
+        await reloadDynamic();
+        showToast('已更新地點與指定遊戲。');
+        rerender();
+      });
+    }
+
+    renderCollapsed();
+  }
+
   // ---- 可玩清單 ----
   function renderPlayableSection() {
     const el = document.getElementById('playable-section');
     const rawList = computePlayableList(event);
-    const pinnedIds = new Set(String(event.game_bgg_ids || '').split(',').map((s) => Number(s.trim())).filter(Boolean));
+    const pinnedIds = new Set(pinnedGameIds(event));
+    const rawListIds = new Set(rawList.map((item) => item.bggId));
+    const unfulfillablePinned = [...pinnedIds].filter((id) => !rawListIds.has(id));
 
     el.innerHTML = `
+      ${unfulfillablePinned.length > 0 ? `
+        <p class="error-text">⚠️ 主持人指定的遊戲中，目前場地／參與者沒有人能帶來：${unfulfillablePinned.map((id) => escapeHtml(getGameMeta(id).name_zh || getGameMeta(id).name_en || String(id))).join('、')}</p>
+      ` : ''}
       <div class="filter-bar">
         <input type="number" min="1" class="form-control" id="filter-players" placeholder="人數" value="${signups.length || ''}">
         <select class="form-control" id="filter-duration">
