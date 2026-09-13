@@ -42,7 +42,10 @@ function doGet(e) {
 function doPost(e) {
   let payload;
   try {
-    payload = JSON.parse(e.postData.contents);
+    // 不要用 e.postData.contents：Apps Script 對 text/plain 的自動解碼常常
+    // 把多位元組的 UTF-8（中文）字元讀壞成亂碼，要透過 Blob 明確指定 UTF-8 解碼。
+    const raw = e.postData.getBlob().getDataAsString('UTF-8');
+    payload = JSON.parse(raw);
   } catch (err) {
     return jsonOutput({ ok: false, error: 'BAD_REQUEST' });
   }
@@ -108,6 +111,35 @@ function stripPassword(member) {
 
 function jsonOutput(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ---------------------------------------------------------------------------
+// 一次性初始化：在 Apps Script 編輯器選這個函式後按「執行」，自動建立七個
+// 分頁與表頭列。只需要跑一次。已經存在的分頁不會被清空或刪除，只會確保表頭
+// 列是正確的（不小心跑第二次也沒關係）。
+// ---------------------------------------------------------------------------
+function setupSheets() {
+  const headers = {
+    members: ['id', 'name', 'type', 'active', 'password'],
+    venues: ['id', 'name', 'holder_id', 'note', 'active'],
+    collections: ['holder_id', 'bgg_id', 'name_zh', 'note'],
+    events: ['event_id', 'created_at', 'creator_id', 'title', 'status', 'venue_id', 'venue_free_text', 'confirmed_slot_id', 'game_bgg_ids', 'note'],
+    slots: ['slot_id', 'event_id', 'date', 'period', 'label'],
+    votes: ['event_id', 'slot_id', 'member_id', 'ok', 'updated_at'],
+    signups: ['event_id', 'member_id', 'joined_at'],
+  };
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  Object.keys(headers).forEach((name) => {
+    const row = headers[name];
+    let sheet = ss.getSheetByName(name);
+    if (!sheet) sheet = ss.insertSheet(name);
+    const range = sheet.getRange(1, 1, 1, row.length);
+    range.setValues([row]);
+    range.setFontWeight('bold');
+  });
+
+  Logger.log('七個分頁與表頭已建立/更新完成：' + Object.keys(headers).join('、'));
 }
 
 // ---------------------------------------------------------------------------

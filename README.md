@@ -60,10 +60,11 @@ node build-games.mjs --collections-csv=./collections-export.csv
 
 ## 建置步驟（正式上線用）
 
-1. **建立 Google 試算表**，依指導書 §4.2 建立六個分頁：`members`、`venues`、`collections`、`events`、`slots`、`votes`、`signups`，第一列填入指導書列出的欄位名（順序需完全一致）。
+1. **建立 Google 試算表**：新增一個空白試算表即可，分頁跟表頭不用手動打。
 
 2. **部署 Apps Script**：
    - 開啟該試算表 → 擴充功能 → Apps Script，把 [apps-script/Code.gs](apps-script/Code.gs) 的內容整個貼進去。
+   - 在編輯器上方的函式下拉選單選 `setupSheets`，按「執行」（▶）。第一次執行會跳出授權畫面，全部同意即可。跑完回去試算表看，七個分頁（`members`／`venues`／`collections`／`events`／`slots`／`votes`／`signups`）跟表頭列會自動建好。這個函式可以重複執行，不會清掉既有資料。
    - 主密碼已經固定寫在檔案裡的 `MASTER_PASSWORD`（見上面「權限模型」），不用額外設定指令碼屬性；要換主密碼就直接改這個常數再重新部署。
    - 部署 → 新增部署作業 → 類型選 Web app，Execute as「我」，Who has access 選「Anyone」。
    - 複製部署網址，貼到 [js/api.js](js/api.js) 的 `DEFAULT_APPS_SCRIPT_URL`。
@@ -72,13 +73,16 @@ node build-games.mjs --collections-csv=./collections-export.csv
 
 4. **部署到 Vercel**：把這個 repo 接到 Vercel，Build Command 留空，Output Directory 設為根目錄（`.`）。`.vercelignore` 已排除 `scripts/` 與 `apps-script/`。
 
-## CORS 實作取捨（§5.2）
+## CORS 實作取捨（§5.2）—— 已對著真正的 Apps Script 網址實測過
 
-目前實作採用**方案一**：寫入用 `POST`＋`Content-Type: text/plain;charset=utf-8`（避開 preflight），並直接讀取回應 JSON（[js/api.js](js/api.js) 的 `postOnce()`）。這個方案在本機模擬後端上驗證沒問題（見上面的 Playwright 測試），但**還沒對著真正的 Google Apps Script 網址實測過**，因為還沒有 §0 的部署網址。
+採用**方案一**：寫入用 `POST`＋`Content-Type: text/plain;charset=utf-8`（避開 preflight），並直接讀取回應 JSON（[js/api.js](js/api.js) 的 `postOnce()`）。**已經對著真正部署的 Apps Script 網址實測 `bootstrap`（GET）跟 `createEvent`／`cancelEvent`（POST）都成功**，不需要 `no-cors` 備援方案。
 
-- 部署完成、填入正式網址後，請實際跑一次「開新團」，確認畫面上真的顯示成功並跳轉到團頁。
-- 若瀏覽器主控台出現 CORS 相關錯誤，改用**備援方案**：`fetch` 加 `mode: 'no-cors'` 送出、不讀回應內容，接著呼叫一次 `reloadDynamic()` 確認資料確實寫入。這個備援邏輯尚未寫進 `js/api.js`，需要時在 `postOnce()` 改寫。
-- 實測後請回來更新這一段，記錄最終採用哪一種、以及是否有遇到問題。
+實測過程中發現並修好兩個跟正式部署有關的坑，記錄下來給以後參考：
+
+1. **部署設定「誰可以存取」沒有真的套用，一直被導去 Google 登入頁**：換了好幾次新部署都一樣，最後換一個全新的部署（不是編輯舊的）才生效。如果你之後也遇到匿名存取一直被導去登入頁，別只改設定重存，試著直接建一個全新的部署（部署 → 新增部署作業，不是編輯管理既有的）。
+2. **中文字透過 POST 傳過去會變亂碼**：Apps Script 的 `e.postData.contents` 對 `text/plain` 內容的 UTF-8 多位元組字元（中文）解碼不可靠，實測建立的團標題「【API測試...】」整個變成亂碼存進 Sheet。已修正為用 `e.postData.getBlob().getDataAsString('UTF-8')` 明確指定編碼（見 [apps-script/Code.gs](apps-script/Code.gs) 的 `doPost`）。**這個修正還沒部署**——你需要把最新的 `Code.gs` 貼回編輯器，「管理部署作業」→ 編輯現有部署 → 版本選「新版本」→ 部署，網址不會變。改完跟我說，我會再送一次含中文的測試資料確認修好了。
+
+實測時建立了 4 筆標題亂碼的測試團（`event_id`: `4be6cb1f`、`417767cd`、`9eacd7fb`、`e554cbae`），已經呼叫 `cancelEvent` 把它們都設成「已取消」，不會出現在首頁的進行中清單，但列還留在 Sheet 裡；如果想要完全乾淨可以自己去 `events`／`slots` 分頁手動刪掉這幾列，不刪也不影響網站運作。
 
 ## 已知限制 / 未完成事項
 
