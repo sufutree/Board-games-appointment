@@ -6,10 +6,9 @@ export const store = {
   loadError: null,
 
   games: {},            // bgg_id(string) -> 遊戲後設資料 (data/games.json)
-  staticCollections: [], // data/collections.json，Sufu 的收藏
   members: [],
   venues: [],
-  sheetCollections: [],  // Sheets collections 分頁：其他持有者的收藏
+  sheetCollections: [],  // Sheets collections 分頁：所有持有者的收藏（含 Sufu）
   events: [],
   slots: [],
   votes: [],
@@ -27,13 +26,11 @@ function notify() {
 export async function loadAll() {
   store.loadError = null;
   try {
-    const [gamesRes, collectionsRes, boot] = await Promise.all([
+    const [gamesRes, boot] = await Promise.all([
       fetch('data/games.json').then((r) => r.json()),
-      fetch('data/collections.json').then((r) => r.json()),
       bootstrap(),
     ]);
     store.games = gamesRes || {};
-    store.staticCollections = collectionsRes || [];
     store.members = boot.members || [];
     store.venues = boot.venues || [];
     store.sheetCollections = boot.collections || [];
@@ -107,17 +104,14 @@ export function signupsOfEvent(eventId) {
   return store.signups.filter((s) => s.event_id === eventId);
 }
 
-// 所有持有者的收藏，合併 repo 靜態資料與 Sheets 資料，統一欄位。
-// 目前先不合併 store.staticCollections（Sufu 的預設收藏 data/collections.json），
-// 網站上暫時不顯示這批資料；要恢復的話把 fromStatic 加回 concat 即可。
+// 所有持有者的收藏，來自 Sheets collections 分頁（含 Sufu，手動維護）。
 export function allOwnerships() {
-  const fromSheet = store.sheetCollections.map((c) => ({
+  return store.sheetCollections.map((c) => ({
     holder_id: c.holder_id,
     bgg_id: Number(c.bgg_id),
     name_zh: c.name_zh || null,
     note: c.note || null,
   }));
-  return fromSheet;
 }
 
 // 取得遊戲後設資料；查無資料時回傳帶 hasData:false 的替代物件。
