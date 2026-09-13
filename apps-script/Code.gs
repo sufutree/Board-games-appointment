@@ -242,6 +242,19 @@ function isTrue(v) {
   return v === true || v === 'TRUE' || v === 'true' || v === 1;
 }
 
+// 同一人對同一時段偶爾會留下不只一筆投票紀錄，只採計 updated_at 最新的一筆。
+function latestVotesFor(eventId, slotId) {
+  const rows = readAll(SHEETS.votes).filter((v) => v.event_id === eventId && v.slot_id === slotId);
+  const latestByMember = new Map();
+  rows.forEach((v) => {
+    const existing = latestByMember.get(v.member_id);
+    if (!existing || String(v.updated_at) > String(existing.updated_at)) {
+      latestByMember.set(v.member_id, v);
+    }
+  });
+  return [...latestByMember.values()];
+}
+
 // ---------------------------------------------------------------------------
 // 端點實作
 // ---------------------------------------------------------------------------
@@ -323,8 +336,11 @@ function confirm(payload) {
   }
   updateRowByIndex(SHEETS.events, eventIdx, updates);
 
-  const okVoters = readAll(SHEETS.votes)
-    .filter((v) => v.event_id === event_id && v.slot_id === slot_id && isTrue(v.ok))
+  // 只採計目前還在名單上的成員、且每人只算最新一次投票（同一人同一時段偶爾
+  // 會留下不只一筆紀錄，只認最新那筆，避免把已經改成「不行」的舊票也算進去）。
+  const activeMemberIds = new Set(readAll(SHEETS.members).map((m) => m.id));
+  const okVoters = latestVotesFor(event_id, slot_id)
+    .filter((v) => isTrue(v.ok) && activeMemberIds.has(v.member_id))
     .map((v) => v.member_id);
 
   const existingSignups = readAll(SHEETS.signups).filter((s) => s.event_id === event_id);

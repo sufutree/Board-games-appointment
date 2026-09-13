@@ -47,9 +47,22 @@ export async function renderEvent(appEl, eventId) {
   const rerender = () => renderEvent(appEl, eventId);
 
   const slots = slotsOfEvent(event.event_id);
-  const votes = votesOfEvent(event.event_id);
-  const signups = signupsOfEvent(event.event_id);
   const members = activeMembers();
+  const memberIds = new Set(members.map((m) => m.id));
+  // 同一人對同一時段偶爾會留下不只一筆投票紀錄，這裡只認目前還在名單上的
+  // 成員、且每人每個時段只採計 updated_at 最新的一筆，避免舊票把畫面上的
+  // 勾選狀態或「可以人數」弄得跟實際情況對不上。
+  const latestBySlotMember = new Map();
+  for (const v of votesOfEvent(event.event_id)) {
+    if (!memberIds.has(v.member_id)) continue;
+    const key = `${v.slot_id}::${v.member_id}`;
+    const existing = latestBySlotMember.get(key);
+    if (!existing || String(v.updated_at) > String(existing.updated_at)) {
+      latestBySlotMember.set(key, v);
+    }
+  }
+  const votes = [...latestBySlotMember.values()];
+  const signups = signupsOfEvent(event.event_id);
   const creator = memberById(event.creator_id);
   const selfId = getSelfId();
   const selfIsValid = members.some((m) => m.id === selfId);
