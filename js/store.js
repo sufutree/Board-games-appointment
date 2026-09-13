@@ -108,20 +108,16 @@ export function signupsOfEvent(eventId) {
 }
 
 // 所有持有者的收藏，合併 repo 靜態資料與 Sheets 資料，統一欄位。
+// 目前先不合併 store.staticCollections（Sufu 的預設收藏 data/collections.json），
+// 網站上暫時不顯示這批資料；要恢復的話把 fromStatic 加回 concat 即可。
 export function allOwnerships() {
-  const fromStatic = store.staticCollections.map((c) => ({
-    holder_id: c.holder_id,
-    bgg_id: Number(c.bgg_id),
-    name_zh: null,
-    note: null,
-  }));
   const fromSheet = store.sheetCollections.map((c) => ({
     holder_id: c.holder_id,
     bgg_id: Number(c.bgg_id),
     name_zh: c.name_zh || null,
     note: c.note || null,
   }));
-  return fromStatic.concat(fromSheet);
+  return fromSheet;
 }
 
 // 取得遊戲後設資料；查無資料時回傳帶 hasData:false 的替代物件。
@@ -133,7 +129,6 @@ export function getGameMeta(bggId, fallbackNameZh) {
     bgg_id: Number(bggId),
     name_zh: fallbackNameZh || `未知遊戲 (${bggId})`,
     name_en: null,
-    bgg_url: `https://boardgamegeek.com/boardgame/${bggId}/`,
     thumbnail: null,
     min_players: null,
     max_players: null,
@@ -143,9 +138,6 @@ export function getGameMeta(bggId, fallbackNameZh) {
     weight: null,
     year: null,
     category: null,
-    retailer_url: null,
-    retail_price: null,
-    retailer: null,
     is_expansion: false,
     parent_bgg_id: null,
     hasData: false,

@@ -147,9 +147,7 @@ export async function renderGames(appEl) {
           <dt>分類</dt><dd>${meta.category ? escapeHtml(CATEGORY_LABELS[meta.category] || meta.category) : '－'}</dd>
           <dt>在哪裡／誰手上</dt>
           <dd>${owners.length === 0 ? '目前沒有人登記持有。' : owners.map((o) => o.venues.length ? `${escapeHtml(o.venues.join('、'))}（${escapeHtml(o.name)}）` : escapeHtml(o.name)).join('、')}</dd>
-          ${meta.retailer_url ? `<dt>代理商</dt><dd><a href="${escapeHtml(meta.retailer_url)}" target="_blank" rel="noopener">${escapeHtml(meta.retailer || '購買連結')}</a>${meta.retail_price ? `　NT$${meta.retail_price}` : ''}</dd>` : ''}
         </dl>
-        <a href="${escapeHtml(meta.bgg_url)}" target="_blank" rel="noopener">在 BGG 上查看 →</a>
         ${expansions.length > 0 ? `
           <div class="section-title" style="margin-top:16px;">擴充</div>
           ${expansions.map((ex) => `<div class="expansion-item">－ ${escapeHtml(ex.meta.name_zh || ex.meta.name_en || String(ex.bggId))}</div>`).join('')}

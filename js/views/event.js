@@ -451,7 +451,7 @@ export async function renderEvent(appEl, eventId) {
     const meta = item.meta;
     const sourceTags = item.sources.map((s) => `<span class="source-tag ${s.isVenueHolder ? 'pinned-tag' : ''}">${escapeHtml(s.label)}</span>`).join('');
     return `
-      <a class="game-card ${pinned ? 'pinned' : ''}" href="${escapeHtml(meta.bgg_url)}" target="_blank" rel="noopener">
+      <div class="game-card ${pinned ? 'pinned' : ''}">
         ${meta.thumbnail ? `<img src="${escapeHtml(meta.thumbnail)}" alt="">` : '<div style="width:56px;height:56px;flex-shrink:0;"></div>'}
         <div class="game-card-body">
           <div class="game-card-name">${pinned ? '⭐ 已指定・' : ''}${escapeHtml(meta.name_zh || meta.name_en || String(item.bggId))}</div>
@@ -461,7 +461,7 @@ export async function renderEvent(appEl, eventId) {
             ${!meta.hasData ? '<span class="source-tag missing-tag">缺少遊戲資料</span>' : ''}
           </div>
         </div>
-      </a>
+      </div>
     `;
   }
 }

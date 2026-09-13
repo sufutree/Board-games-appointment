@@ -41,13 +41,22 @@ function doGet(e) {
 
 function doPost(e) {
   let payload;
+  let raw;
   try {
     // 不要用 e.postData.contents：Apps Script 對 text/plain 的自動解碼常常
     // 把多位元組的 UTF-8（中文）字元讀壞成亂碼，要透過 Blob 明確指定 UTF-8 解碼。
-    const raw = e.postData.getBlob().getDataAsString('UTF-8');
+    raw = e.postData.getBlob().getDataAsString('UTF-8');
     payload = JSON.parse(raw);
   } catch (err) {
-    return jsonOutput({ ok: false, error: 'BAD_REQUEST' });
+    // 暫時診斷用：把收到的原始內容跟錯誤訊息一起回傳，方便排查編碼問題。
+    return jsonOutput({
+      ok: false,
+      error: 'BAD_REQUEST',
+      debug_raw: raw,
+      debug_rawCharCodes: raw ? raw.slice(0, 40).split('').map((c) => c.charCodeAt(0)) : null,
+      debug_postDataType: e.postData ? e.postData.type : null,
+      debug_errMessage: String(err && err.message || err),
+    });
   }
 
   try {
@@ -80,7 +89,13 @@ function doPost(e) {
         return jsonOutput(cancelEvent(payload));
       }
       default:
-        return jsonOutput({ ok: false, error: 'UNKNOWN_ACTION' });
+        // 暫時診斷用：把實際解析出來的 payload 一起回傳。
+        return jsonOutput({
+          ok: false,
+          error: 'UNKNOWN_ACTION',
+          debug_payload: payload,
+          debug_actionCharCodes: String(payload.action || '').split('').map((c) => c.charCodeAt(0)),
+        });
     }
   } catch (err) {
     return jsonOutput({ ok: false, error: String(err && err.message || err) });
