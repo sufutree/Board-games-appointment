@@ -1,5 +1,5 @@
 // Apps Script 讀寫封裝。
-const DEFAULT_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwUAB_1pZBCjnmuIXkG8cPhsjIaeA5ip_oVWCNnabzgzS5y_D6O-badr-RNKDl-PCv7UQ/exec';
+const DEFAULT_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyq5N8QXszXstdZhruUbo8sFE2_Yb6bqKzRJjypt5UWGbJGkA-_ZMiz0vHhQ-21Z1jqsQ/exec';
 
 // 開發用：網址加 ?api=http://localhost:8788 可暫時指向本機模擬後端（見 scripts/dev-mock-server.mjs），
 // 不用改這個檔案就能在正式網址設定好之前先預覽整個流程。正式部署不要帶這個參數即可。
