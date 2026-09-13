@@ -43,9 +43,13 @@ function doGet(e) {
 function doPost(e) {
   let payload;
   try {
-    // 不要用 e.postData.contents：Apps Script 對 text/plain 的自動解碼常常
-    // 把多位元組的 UTF-8（中文）字元讀壞成亂碼，要透過 Blob 明確指定 UTF-8 解碼。
-    const raw = e.postData.getBlob().getDataAsString('UTF-8');
+    // e.postData.contents 對 text/plain 內容的 UTF-8 多位元組字元（中文）解碼
+    // 不可靠，e.postData 本身也沒有可用的方法能明確指定編碼重新解碼一次。改用
+    // Base64 傳輸（js/api.js 的 utf8ToBase64()）：body 本身是純 ASCII，不會被
+    // 誤判編碼，這裡用 Utilities.newBlob() 包出一個「真的」Blob 才能呼叫
+    // getDataAsString('UTF-8') 明確還原。
+    const bytes = Utilities.base64Decode(e.postData.contents);
+    const raw = Utilities.newBlob(bytes).getDataAsString('UTF-8');
     payload = JSON.parse(raw);
   } catch (err) {
     return jsonOutput({ ok: false, error: 'BAD_REQUEST' });
@@ -95,9 +99,11 @@ function checkAuth(memberId, providedSecret) {
   if (providedSecret === MASTER_PASSWORD) return true;
   const member = readAll(SHEETS.members).find((m) => m.id === memberId);
   if (!member) return false;
-  const storedPassword = member.password || '';
+  // 密碼欄如果整欄看起來像數字（例如 1234），Sheets 會存成 number 型別，
+  // 這裡統一轉成字串比較，避免 "1234" !== 1234 這種型別不一致的假錯誤。
+  const storedPassword = member.password != null ? String(member.password) : '';
   if (storedPassword === '') return true;
-  return providedSecret === storedPassword;
+  return String(providedSecret) === storedPassword;
 }
 
 function findEvent(eventId) {

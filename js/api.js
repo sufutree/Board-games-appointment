@@ -152,12 +152,24 @@ export async function writeAction(action, payload, requiredMemberId, memberLabel
   return result;
 }
 
+// Apps Script 的 e.postData.contents 對 text/plain 內容的 UTF-8 多位元組字元
+// （中文）解碼不可靠，而 e.postData 本身沒有可用的 Blob 方法可以明確指定編碼。
+// 改用 Base64 傳輸：瀏覽器端把 JSON 字串轉成 UTF-8 位元組再編碼成 Base64（純
+// ASCII，不會被誤判編碼），Code.gs 那邊用 Utilities.base64Decode + newBlob
+// 明確指定 UTF-8 解碼還原，兩邊都是決定性的操作，不依賴平台猜測編碼。
+function utf8ToBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  bytes.forEach((b) => { binary += String.fromCharCode(b); });
+  return btoa(binary);
+}
+
 async function postOnce(action, payload, secret) {
   try {
     const res = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action, secret, ...payload }),
+      body: utf8ToBase64(JSON.stringify({ action, secret, ...payload })),
     });
     if (!res.ok) return { ok: false, error: 'NETWORK_ERROR' };
     return await res.json();
