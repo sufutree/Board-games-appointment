@@ -256,11 +256,21 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       let payload;
       try {
-        payload = JSON.parse(body);
+        // js/api.js 的 postOnce() 一律把 body 用 Base64 編碼送出（繞過正式 Apps
+        // Script 對 text/plain 中文解碼不可靠的問題），這裡跟 apps-script/Code.gs
+        // 的 doPost 一樣要先解 Base64 才能 JSON.parse，不然真正的前端請求一律
+        // BAD_REQUEST。
+        const raw = Buffer.from(body, 'base64').toString('utf-8');
+        payload = JSON.parse(raw);
       } catch {
         res.end(JSON.stringify({ ok: false, error: 'BAD_REQUEST' }));
         return;
       }
+      if (payload.action === 'verifySecret') {
+        res.end(JSON.stringify(checkAuth(payload.member_id, payload.secret) ? { ok: true } : { ok: false, error: 'BAD_SECRET' }));
+        return;
+      }
+
       const action = ACTIONS[payload.action];
       if (!action) {
         res.end(JSON.stringify({ ok: false, error: 'UNKNOWN_ACTION' }));

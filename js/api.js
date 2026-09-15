@@ -126,6 +126,13 @@ export async function bootstrap() {
   return data;
 }
 
+// 純驗證用：向後端確認 memberId + secret 是否對得起來，不做任何資料異動。
+// 用在「點自己的名字」選身分的當下，讓密碼錯誤立刻被抓到，而不是拖到下一次
+// 寫入動作（投票/報名…）才發現密碼被誤存成錯的。
+export async function verifySecret(memberId, secret) {
+  return postOnce('verifySecret', { member_id: memberId }, secret);
+}
+
 // 執行一個需要密碼的寫入動作。payload 不含 action/secret，由這裡補上。
 // requiredMemberId：這個動作「本人」是誰（投票者、報名/退出者、發起人…）。
 // memberLabel：該成員的顯示名稱，用在密碼輸入框的提示文字。

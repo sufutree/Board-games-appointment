@@ -33,14 +33,16 @@ const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 const PERIOD_LABELS = { afternoon: '下午', evening: '晚上' };
 
 function doGet(e) {
+  resetRequestCache();
   const action = e.parameter && e.parameter.action;
   if (action === 'bootstrap') {
-    return jsonOutput(bootstrap());
+    return jsonOutput(bootstrapCached());
   }
   return jsonOutput({ ok: false, error: 'UNKNOWN_ACTION' });
 }
 
 function doPost(e) {
+  resetRequestCache();
   let payload;
   try {
     // e.postData.contents 對 text/plain 內容的 UTF-8 多位元組字元（中文）解碼
@@ -69,6 +71,8 @@ function doPost(e) {
         if (!checkAuth(ev.creator_id, payload.secret)) return jsonOutput({ ok: false, error: 'BAD_SECRET' });
         return jsonOutput(confirm(payload));
       }
+      case 'verifySecret':
+        return jsonOutput(checkAuth(payload.member_id, payload.secret) ? { ok: true } : { ok: false, error: 'BAD_SECRET' });
       case 'toggleSignup':
         if (!checkAuth(payload.member_id, payload.secret)) return jsonOutput({ ok: false, error: 'BAD_SECRET' });
         return jsonOutput(toggleSignup(payload));
@@ -121,6 +125,43 @@ function jsonOutput(obj) {
 }
 
 // ---------------------------------------------------------------------------
+// bootstrap 快取：GET ?action=bootstrap 是每個訪客一開頁面就會打的請求，
+// 用 CacheService（跨請求、所有訪客共用）快取 20 秒，把「大家幾乎同時開頁面」
+// 的重複讀取變成一次 Sheets 讀取＋N 次快取命中。任何寫入動作成功後都會呼叫
+// invalidateBootstrapCache() 主動清掉，所以最多延遲 20 秒看到新資料，不會有
+// 「快取比使用者自己剛做的操作還舊」的情況。
+// ---------------------------------------------------------------------------
+const BOOTSTRAP_CACHE_KEY = 'bootstrap_v1';
+const BOOTSTRAP_CACHE_TTL_SECONDS = 20;
+
+function bootstrapCached() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(BOOTSTRAP_CACHE_KEY);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (err) {
+      // 壞掉的快取內容，當作沒快取繼續往下重新讀取。
+    }
+  }
+  const data = bootstrap();
+  try {
+    cache.put(BOOTSTRAP_CACHE_KEY, JSON.stringify(data), BOOTSTRAP_CACHE_TTL_SECONDS);
+  } catch (err) {
+    // CacheService 單筆快取上限 100KB，資料量超過時就不快取，不影響功能。
+  }
+  return data;
+}
+
+function invalidateBootstrapCache() {
+  try {
+    CacheService.getScriptCache().remove(BOOTSTRAP_CACHE_KEY);
+  } catch (err) {
+    // ignore
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 一次性初始化：在 Apps Script 編輯器選這個函式後按「執行」，自動建立所有
 // 分頁與表頭列。可以重複執行，已經存在的分頁不會被清空或刪除，只會確保表頭
 // 列是正確的（例如把 venues 的 holder_id 表頭改名成 unlock_member_ids）。
@@ -162,19 +203,49 @@ function getSheet(name) {
   return sheet;
 }
 
+// ---------------------------------------------------------------------------
+// 單次 doGet/doPost 執行內的讀取快取：同一次請求常常對同一分頁重複呼叫
+// readAll（例如 checkAuth 讀一次 members，action 本身可能又讀一次），改成
+// 快取結果、寫入後才失效，把「一次請求對同一分頁重讀好幾次」的 Sheets API
+// 呼叫收斂成最多一次。resetRequestCache() 由 doGet/doPost 在最開頭呼叫，
+// 避免 Apps Script 偶發的執行環境重用讓快取跨請求殘留，造成讀到舊資料。
+// ---------------------------------------------------------------------------
+let _readCache = {};
+let _headerCache = {};
+
+function resetRequestCache() {
+  _readCache = {};
+  _headerCache = {};
+}
+
+function getHeaders(sheetName) {
+  if (_headerCache[sheetName]) return _headerCache[sheetName];
+  const sheet = getSheet(sheetName);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  _headerCache[sheetName] = headers;
+  return headers;
+}
+
 // 讀取整張表為物件陣列，第一列為欄位名。
 function readAll(sheetName) {
+  if (_readCache[sheetName]) return _readCache[sheetName];
   const sheet = getSheet(sheetName);
   const values = sheet.getDataRange().getValues();
-  if (values.length < 2) return [];
-  const headers = values[0];
-  return values.slice(1)
-    .filter((row) => row.some((cell) => cell !== '' && cell !== null))
-    .map((row) => {
-      const obj = {};
-      headers.forEach((h, i) => { obj[h] = normalizeCell(row[i]); });
-      return obj;
-    });
+  let rows;
+  if (values.length < 2) {
+    rows = [];
+  } else {
+    const headers = values[0];
+    rows = values.slice(1)
+      .filter((row) => row.some((cell) => cell !== '' && cell !== null))
+      .map((row) => {
+        const obj = {};
+        headers.forEach((h, i) => { obj[h] = normalizeCell(row[i]); });
+        return obj;
+      });
+  }
+  _readCache[sheetName] = rows;
+  return rows;
 }
 
 function normalizeCell(val) {
@@ -187,9 +258,10 @@ function normalizeCell(val) {
 // 依 header 順序把一個物件寫成新的一列。
 function appendObject(sheetName, obj) {
   const sheet = getSheet(sheetName);
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const headers = getHeaders(sheetName);
   const row = headers.map((h) => (obj[h] !== undefined ? obj[h] : ''));
   sheet.appendRow(row);
+  delete _readCache[sheetName];
 }
 
 // 找出符合條件的資料列（0-based，不含表頭），回傳 -1 表示找不到。
@@ -208,18 +280,20 @@ function findAllRowIndexes(sheetName, predicate) {
 // 用欄位名更新指定資料列（dataRowIndex 為 0-based，不含表頭）。
 function updateRowByIndex(sheetName, dataRowIndex, updates) {
   const sheet = getSheet(sheetName);
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const headers = getHeaders(sheetName);
   const sheetRow = dataRowIndex + 2; // +1 表頭 +1 轉 1-based
   Object.keys(updates).forEach((key) => {
     const col = headers.indexOf(key);
     if (col === -1) return;
     sheet.getRange(sheetRow, col + 1).setValue(updates[key]);
   });
+  delete _readCache[sheetName];
 }
 
 function deleteRowByIndex(sheetName, dataRowIndex) {
   const sheet = getSheet(sheetName);
   sheet.deleteRow(dataRowIndex + 2);
+  delete _readCache[sheetName];
 }
 
 function newId() {
@@ -302,6 +376,7 @@ function createEvent(payload) {
     return row;
   });
 
+  invalidateBootstrapCache();
   return { ok: true, event_id: eventId, event: eventRow, slots: slotRows };
 }
 
@@ -318,6 +393,7 @@ function vote(payload) {
       updateRowByIndex(SHEETS.votes, idx, { ok: v.ok, updated_at: nowIso() });
     }
   });
+  invalidateBootstrapCache();
   return { ok: true };
 }
 
@@ -353,6 +429,7 @@ function confirm(payload) {
     }
   });
 
+  invalidateBootstrapCache();
   return { ok: true };
 }
 
@@ -367,6 +444,7 @@ function toggleSignup(payload) {
     const idxs = findAllRowIndexes(SHEETS.signups, (row) => row.event_id === event_id && row.member_id === member_id);
     idxs.sort((a, b) => b - a).forEach((idx) => deleteRowByIndex(SHEETS.signups, idx));
   }
+  invalidateBootstrapCache();
   return { ok: true };
 }
 
@@ -387,6 +465,7 @@ function updateEventDetails(payload) {
     updates.venue_free_text = '';
   }
   updateRowByIndex(SHEETS.events, idx, updates);
+  invalidateBootstrapCache();
   return { ok: true };
 }
 
@@ -395,5 +474,6 @@ function cancelEvent(payload) {
   const idx = findRowIndex(SHEETS.events, (row) => row.event_id === event_id);
   if (idx === -1) throw new Error('EVENT_NOT_FOUND');
   updateRowByIndex(SHEETS.events, idx, { status: 'cancelled' });
+  invalidateBootstrapCache();
   return { ok: true };
 }

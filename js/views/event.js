@@ -6,7 +6,7 @@ import {
   computePlayableList, filterGames, formatSlotLabel, allGamesWithHolders,
   formatPlayers, formatDuration, formatWeight, venueQualifies,
 } from '../rules.js';
-import { writeAction, promptPassword, getSelfId, setSelfId, clearSelfId, rememberSecret } from '../api.js';
+import { writeAction, promptPassword, getSelfId, setSelfId, clearSelfId, rememberSecret, verifySecret } from '../api.js';
 import { escapeHtml, showToast } from '../app.js';
 
 const STATUS_LABEL = { open: '投票中', confirmed: '已定案', cancelled: '已取消' };
@@ -139,11 +139,33 @@ export async function renderEvent(appEl, eventId) {
       `;
       el.querySelectorAll('button[data-member-id]').forEach((btn) => {
         btn.addEventListener('click', async () => {
-          const member = memberById(btn.dataset.memberId);
-          const password = await promptPassword(member ? member.name : btn.dataset.memberId, false);
+          const memberId = btn.dataset.memberId;
+          const member = memberById(memberId);
+          const label = member ? member.name : memberId;
+          const allButtons = el.querySelectorAll('button[data-member-id]');
+
+          let password = await promptPassword(label, false);
           if (password == null) return; // 使用者取消，留在選擇畫面
-          setSelfId(btn.dataset.memberId);
-          rememberSecret(btn.dataset.memberId, password);
+
+          // 送出後鎖住整排按鈕、把文字換成「驗證中…」，讓使用者清楚看到目前
+          // 正在等後端確認密碼，不能誤以為已經選好身分、跑去點下一步。
+          allButtons.forEach((b) => { b.disabled = true; });
+          btn.textContent = `${label}（驗證中…）`;
+
+          let result = await verifySecret(memberId, password);
+          while (!result.ok) {
+            password = await promptPassword(label, true);
+            if (password == null) {
+              allButtons.forEach((b) => { b.disabled = false; });
+              btn.textContent = label;
+              return; // 使用者取消，留在選擇畫面
+            }
+            btn.textContent = `${label}（驗證中…）`;
+            result = await verifySecret(memberId, password);
+          }
+
+          setSelfId(memberId);
+          rememberSecret(memberId, password);
           rerender();
         });
       });
