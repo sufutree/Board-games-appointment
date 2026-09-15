@@ -101,7 +101,7 @@ function doPost(e) {
 // 該成員密碼欄位留空 = 還沒設密碼，先不擋。
 function checkAuth(memberId, providedSecret) {
   if (providedSecret === MASTER_PASSWORD) return true;
-  const member = readAll(SHEETS.members).find((m) => m.id === memberId);
+  const member = readAll(SHEETS.members).find((m) => idEq(m.id, memberId));
   if (!member) return false;
   // 密碼欄如果整欄看起來像數字（例如 1234），Sheets 會存成 number 型別，
   // 這裡統一轉成字串比較，避免 "1234" !== 1234 這種型別不一致的假錯誤。
@@ -111,7 +111,7 @@ function checkAuth(memberId, providedSecret) {
 }
 
 function findEvent(eventId) {
-  return readAll(SHEETS.events).find((row) => row.event_id === eventId) || null;
+  return readAll(SHEETS.events).find((row) => idEq(row.event_id, eventId)) || null;
 }
 
 // 絕對不要把密碼透過 bootstrap 傳到瀏覽器（每個訪客都會收到 bootstrap 的內容）。
@@ -316,14 +316,25 @@ function isTrue(v) {
   return v === true || v === 'TRUE' || v === 'true' || v === 1;
 }
 
+// newId() 產生的 id（event_id／slot_id）是 UUID 前 8 碼的英數字串，剛好幾個字
+// 都是數字的機率不低（約 2%），這種「看起來像數字」的字串寫進 Google Sheets
+// 會被自動轉型成 number（跟 checkAuth 那裡處理密碼欄位是同一種 Sheets 行為）。
+// 但從前端 payload 來的永遠是 JS 字串，用 === 比對字串跟數字一律是 false，
+// 導致 findRowIndex 永遠找不到既有列、每次都新增一筆——這正是「同一人同一
+// 時段投票會累積很多筆」的根本原因。所有 id 比對一律用 idEq()，不要用 ===。
+function idEq(a, b) {
+  return String(a) === String(b);
+}
+
 // 同一人對同一時段偶爾會留下不只一筆投票紀錄，只採計 updated_at 最新的一筆。
 function latestVotesFor(eventId, slotId) {
-  const rows = readAll(SHEETS.votes).filter((v) => v.event_id === eventId && v.slot_id === slotId);
+  const rows = readAll(SHEETS.votes).filter((v) => idEq(v.event_id, eventId) && idEq(v.slot_id, slotId));
   const latestByMember = new Map();
   rows.forEach((v) => {
-    const existing = latestByMember.get(v.member_id);
+    const key = String(v.member_id);
+    const existing = latestByMember.get(key);
     if (!existing || String(v.updated_at) > String(existing.updated_at)) {
-      latestByMember.set(v.member_id, v);
+      latestByMember.set(key, v);
     }
   });
   return [...latestByMember.values()];
@@ -384,7 +395,7 @@ function vote(payload) {
   const { event_id, member_id, votes: voteList } = payload;
   (voteList || []).forEach((v) => {
     const idx = findRowIndex(SHEETS.votes, (row) =>
-      row.event_id === event_id && row.slot_id === v.slot_id && row.member_id === member_id);
+      idEq(row.event_id, event_id) && idEq(row.slot_id, v.slot_id) && idEq(row.member_id, member_id));
     if (idx === -1) {
       appendObject(SHEETS.votes, {
         event_id, slot_id: v.slot_id, member_id, ok: v.ok, updated_at: nowIso(),
@@ -399,7 +410,7 @@ function vote(payload) {
 
 function confirm(payload) {
   const { event_id, slot_id } = payload;
-  const eventIdx = findRowIndex(SHEETS.events, (row) => row.event_id === event_id);
+  const eventIdx = findRowIndex(SHEETS.events, (row) => idEq(row.event_id, event_id));
   if (eventIdx === -1) throw new Error('EVENT_NOT_FOUND');
 
   const updates = { confirmed_slot_id: slot_id, status: 'confirmed' };
@@ -414,18 +425,18 @@ function confirm(payload) {
 
   // 只採計目前還在名單上的成員、且每人只算最新一次投票（同一人同一時段偶爾
   // 會留下不只一筆紀錄，只認最新那筆，避免把已經改成「不行」的舊票也算進去）。
-  const activeMemberIds = new Set(readAll(SHEETS.members).map((m) => m.id));
+  const activeMemberIds = new Set(readAll(SHEETS.members).map((m) => String(m.id)));
   const okVoters = latestVotesFor(event_id, slot_id)
-    .filter((v) => isTrue(v.ok) && activeMemberIds.has(v.member_id))
+    .filter((v) => isTrue(v.ok) && activeMemberIds.has(String(v.member_id)))
     .map((v) => v.member_id);
 
-  const existingSignups = readAll(SHEETS.signups).filter((s) => s.event_id === event_id);
-  const existingMemberIds = new Set(existingSignups.map((s) => s.member_id));
+  const existingSignups = readAll(SHEETS.signups).filter((s) => idEq(s.event_id, event_id));
+  const existingMemberIds = new Set(existingSignups.map((s) => String(s.member_id)));
 
   okVoters.forEach((memberId) => {
-    if (!existingMemberIds.has(memberId)) {
+    if (!existingMemberIds.has(String(memberId))) {
       appendObject(SHEETS.signups, { event_id, member_id: memberId, joined_at: nowIso() });
-      existingMemberIds.add(memberId);
+      existingMemberIds.add(String(memberId));
     }
   });
 
@@ -436,12 +447,12 @@ function confirm(payload) {
 function toggleSignup(payload) {
   const { event_id, member_id, join } = payload;
   if (join) {
-    const exists = findRowIndex(SHEETS.signups, (row) => row.event_id === event_id && row.member_id === member_id);
+    const exists = findRowIndex(SHEETS.signups, (row) => idEq(row.event_id, event_id) && idEq(row.member_id, member_id));
     if (exists === -1) {
       appendObject(SHEETS.signups, { event_id, member_id, joined_at: nowIso() });
     }
   } else {
-    const idxs = findAllRowIndexes(SHEETS.signups, (row) => row.event_id === event_id && row.member_id === member_id);
+    const idxs = findAllRowIndexes(SHEETS.signups, (row) => idEq(row.event_id, event_id) && idEq(row.member_id, member_id));
     idxs.sort((a, b) => b - a).forEach((idx) => deleteRowByIndex(SHEETS.signups, idx));
   }
   invalidateBootstrapCache();
@@ -451,7 +462,7 @@ function toggleSignup(payload) {
 // 成團後發起人仍可調整指定遊戲與地點。
 function updateEventDetails(payload) {
   const { event_id, game_bgg_ids, venue_id, venue_free_text } = payload;
-  const idx = findRowIndex(SHEETS.events, (row) => row.event_id === event_id);
+  const idx = findRowIndex(SHEETS.events, (row) => idEq(row.event_id, event_id));
   if (idx === -1) throw new Error('EVENT_NOT_FOUND');
   const updates = { game_bgg_ids: (game_bgg_ids || []).join(',') };
   if (venue_id) {
@@ -471,7 +482,7 @@ function updateEventDetails(payload) {
 
 function cancelEvent(payload) {
   const { event_id } = payload;
-  const idx = findRowIndex(SHEETS.events, (row) => row.event_id === event_id);
+  const idx = findRowIndex(SHEETS.events, (row) => idEq(row.event_id, event_id));
   if (idx === -1) throw new Error('EVENT_NOT_FOUND');
   updateRowByIndex(SHEETS.events, idx, { status: 'cancelled' });
   invalidateBootstrapCache();
