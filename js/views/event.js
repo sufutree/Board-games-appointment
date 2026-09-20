@@ -226,30 +226,30 @@ export async function renderEvent(appEl, eventId) {
     }
   }
 
+  // 每次點擊只送出「這一格」的投票，不要像過去那樣把所有時段的目前狀態一起
+  // 重送一次：兩個不同時段的按鈕如果在彼此的請求還沒回來前都被點了，各自的
+  // payload 是用同一份舊的 votes 快照算出來的，先送出的那個請求如果比較晚
+  // 回來，就會用它那份舊資料把後點的時段蓋回原本的值——畫面上看起來像是
+  // 「點了有反應，過一陣子又跳回去」。改成只送單一時段，並且在請求進行中
+  // 鎖住全部投票按鈕（不只是被點的那顆），從根本避免這種互相蓋寫的競態。
   async function onVoteToggle(slotId, btn) {
     const wasOk = btn.classList.contains('ok');
     const nextOk = !wasOk;
+    const allVoteBtns = [...document.querySelectorAll('.vote-cell-btn')];
+    allVoteBtns.forEach((b) => { b.disabled = true; });
     btn.classList.toggle('ok', nextOk);
     btn.textContent = nextOk ? '可以' : '不行';
-    btn.disabled = true;
-
-    const selfVotesMap = new Map();
-    for (const s of slots) {
-      const existing = votes.find((v) => v.slot_id === s.slot_id && v.member_id === selfId);
-      selfVotesMap.set(s.slot_id, existing ? isTrue(existing.ok) : false);
-    }
-    selfVotesMap.set(slotId, nextOk);
 
     const payload = {
       event_id: event.event_id,
       member_id: selfId,
-      votes: [...selfVotesMap.entries()].map(([sid, ok]) => ({ slot_id: sid, ok })),
+      votes: [{ slot_id: slotId, ok: nextOk }],
     };
 
     const selfMember = memberById(selfId);
     const result = await writeAction('vote', payload, selfId, selfMember ? selfMember.name : selfId);
     if (!result.ok) {
-      btn.disabled = false;
+      allVoteBtns.forEach((b) => { b.disabled = false; });
       if (result.error !== 'CANCELLED') showToast(`投票失敗：${result.error}`);
       btn.classList.toggle('ok', wasOk);
       btn.textContent = wasOk ? '可以' : '不行';

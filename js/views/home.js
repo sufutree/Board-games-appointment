@@ -17,9 +17,26 @@ function gamesLabel(event) {
   return ids.map((id) => getGameMeta(id).name_zh).join('、');
 }
 
+// 同一人對同一時段偶爾會留下不只一筆投票紀錄，只採計每人每個時段 updated_at
+// 最新的一筆，避免舊票把「可以人數」灌水（event.js 的投票表已經有這個邏輯，
+// 首頁卡片這裡也要一致，不然同一個團在兩個畫面看到的可以人數會對不上）。
+function latestVotesOfEvent(eventId) {
+  const memberIds = new Set(activeMembers().map((m) => m.id));
+  const latestBySlotMember = new Map();
+  for (const v of votesOfEvent(eventId)) {
+    if (!memberIds.has(v.member_id)) continue;
+    const key = `${v.slot_id}::${v.member_id}`;
+    const existing = latestBySlotMember.get(key);
+    if (!existing || String(v.updated_at) > String(existing.updated_at)) {
+      latestBySlotMember.set(key, v);
+    }
+  }
+  return [...latestBySlotMember.values()];
+}
+
 function renderOpenCard(event) {
   const slots = slotsOfEvent(event.event_id);
-  const votes = votesOfEvent(event.event_id);
+  const votes = latestVotesOfEvent(event.event_id);
   const totalMembers = activeMembers().length;
   const votedMemberIds = new Set(votes.map((v) => v.member_id));
   const creator = memberById(event.creator_id);

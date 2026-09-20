@@ -94,8 +94,18 @@ export function eventById(id) {
   return store.events.find((e) => e.event_id === id) || null;
 }
 
+const PERIOD_ORDER = { afternoon: 0, evening: 1 };
+
+// 依日期＋時段由近到遠排序，不依賴發起人建立候選時段的先後順序。
 export function slotsOfEvent(eventId) {
-  return store.slots.filter((s) => s.event_id === eventId);
+  return store.slots
+    .filter((s) => s.event_id === eventId)
+    .sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+      const pa = PERIOD_ORDER[a.period] ?? 99;
+      const pb = PERIOD_ORDER[b.period] ?? 99;
+      return pa - pb;
+    });
 }
 
 export function votesOfEvent(eventId) {

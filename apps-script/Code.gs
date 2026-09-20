@@ -29,6 +29,16 @@ const SHEETS = {
   signups: 'signups',
 };
 
+// 這些欄位存的是逗號分隔的多個 ID（例如 "332772,385685"）。Google Sheets 對
+// 「看起來像數字」的字串會自動轉型成 number（用該地區的千分位規則解讀逗號），
+// 於是 "332772,385685" 會被存成 332772385685 這個單一數字，逗號整個消失，
+// 讀回來 split(',') 就變成一個查無此遊戲的巨大 ID。寫入這些欄位前一律把儲存
+// 格式鎖定成純文字（'@'），避免這個自動轉型。
+const TEXT_COLUMNS = {
+  events: ['game_bgg_ids'],
+  venues: ['unlock_member_ids'],
+};
+
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 const PERIOD_LABELS = { afternoon: '下午', evening: '晚上' };
 
@@ -260,7 +270,13 @@ function appendObject(sheetName, obj) {
   const sheet = getSheet(sheetName);
   const headers = getHeaders(sheetName);
   const row = headers.map((h) => (obj[h] !== undefined ? obj[h] : ''));
-  sheet.appendRow(row);
+  const rowIndex = sheet.getLastRow() + 1;
+  const range = sheet.getRange(rowIndex, 1, 1, row.length);
+  (TEXT_COLUMNS[sheetName] || []).forEach((colName) => {
+    const col = headers.indexOf(colName);
+    if (col !== -1) range.getCell(1, col + 1).setNumberFormat('@');
+  });
+  range.setValues([row]);
   delete _readCache[sheetName];
 }
 
@@ -282,10 +298,13 @@ function updateRowByIndex(sheetName, dataRowIndex, updates) {
   const sheet = getSheet(sheetName);
   const headers = getHeaders(sheetName);
   const sheetRow = dataRowIndex + 2; // +1 表頭 +1 轉 1-based
+  const textCols = TEXT_COLUMNS[sheetName] || [];
   Object.keys(updates).forEach((key) => {
     const col = headers.indexOf(key);
     if (col === -1) return;
-    sheet.getRange(sheetRow, col + 1).setValue(updates[key]);
+    const cell = sheet.getRange(sheetRow, col + 1);
+    if (textCols.includes(key)) cell.setNumberFormat('@');
+    cell.setValue(updates[key]);
   });
   delete _readCache[sheetName];
 }
