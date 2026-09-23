@@ -18,6 +18,109 @@
 
 const MASTER_PASSWORD = 'sufutree';
 
+// --- Firestore POC ---------------------------------------------------------
+// 讀取路徑（bootstrap）維持打 Sheets 不變；這裡只是「順便」把每次成功的寫入
+// 鏡像一份到 Firestore，讓前端可以選擇改讀 Firestore 來比較體感速度。
+// Sheets 永遠是唯一事實來源／唯一驗證密碼的地方，Firestore 鏡像失敗只記 log
+// 不會讓原本的寫入動作失敗。
+//
+// 設定步驟：
+//   1. Firebase Console 建立專案、啟用 Firestore（Native mode）。
+//   2. 把下面 FIRESTORE_PROJECT_ID 換成該專案的 Project ID。
+//   3. 這個 Apps Script 專案的「專案設定」→「Google Cloud Platform (GCP) 專案」
+//      改成跟 Firestore 同一個 GCP 專案（Firebase 專案背後就是一個 GCP 專案，
+//      專案 ID／專案編號在 Firebase Console 的專案設定可以找到）。
+//   4. 編輯器上方選單「檢視」→「顯示 manifest 檔案」，appsscript.json 的
+//      oauthScopes 陣列要包含 "https://www.googleapis.com/auth/datastore"
+//      （沒有這個 appsscript.json 沒有 oauthScopes 欄位時，Apps Script 會自動
+//      偵測所用到的服務所需的範圍，但 UrlFetchApp + getOAuthToken() 這種手動
+//      組 token 的用法偵測不到，要手動加這行）。
+//   5. 存檔、部署新版本後，在編輯器選 migrateAllToFirestore 執行一次，把現有
+//      Sheets 資料匯入 Firestore 當初始快照。之後所有寫入動作會自動鏡像。
+const FIRESTORE_PROJECT_ID = 'PASTE_ME';
+
+function firestoreEnabled() {
+  return FIRESTORE_PROJECT_ID && FIRESTORE_PROJECT_ID !== 'PASTE_ME';
+}
+
+function firestoreDocUrl(collectionName, docId) {
+  return 'https://firestore.googleapis.com/v1/projects/' + FIRESTORE_PROJECT_ID +
+    '/databases/(default)/documents/' + collectionName + '/' + encodeURIComponent(String(docId));
+}
+
+function firestoreSet(collectionName, docId, obj) {
+  if (!firestoreEnabled()) return;
+  try {
+    const res = UrlFetchApp.fetch(firestoreDocUrl(collectionName, docId), {
+      method: 'patch',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      payload: JSON.stringify({ fields: toFirestoreFields(obj) }),
+      muteHttpExceptions: true,
+    });
+    if (res.getResponseCode() >= 300) {
+      Logger.log('Firestore 鏡像寫入失敗 (' + collectionName + '/' + docId + '): ' + res.getContentText());
+    }
+  } catch (err) {
+    Logger.log('Firestore 鏡像寫入例外 (' + collectionName + '/' + docId + '): ' + err);
+  }
+}
+
+function firestoreDelete(collectionName, docId) {
+  if (!firestoreEnabled()) return;
+  try {
+    const res = UrlFetchApp.fetch(firestoreDocUrl(collectionName, docId), {
+      method: 'delete',
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      muteHttpExceptions: true,
+    });
+    if (res.getResponseCode() >= 300 && res.getResponseCode() !== 404) {
+      Logger.log('Firestore 鏡像刪除失敗 (' + collectionName + '/' + docId + '): ' + res.getContentText());
+    }
+  } catch (err) {
+    Logger.log('Firestore 鏡像刪除例外 (' + collectionName + '/' + docId + '): ' + err);
+  }
+}
+
+function toFirestoreFields(obj) {
+  const fields = {};
+  Object.keys(obj).forEach((key) => {
+    const v = obj[key];
+    if (v === undefined) return;
+    fields[key] = toFirestoreValue(v);
+  });
+  return fields;
+}
+
+function toFirestoreValue(v) {
+  if (v === null) return { nullValue: null };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number') {
+    return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  }
+  return { stringValue: String(v) };
+}
+
+// 一次性：把現有 Sheets 資料整批匯入 Firestore，當作 Firestore 這邊的初始快照。
+// 之後手動改 Sheet 上的 members/venues/games/collections（不經過寫入 API 的部分）
+// 要記得重跑一次這個函式，Firestore 才會跟著更新；events/slots/votes/signups
+// 這些走寫入 API 的資料，寫入當下就會自動鏡像，不用重跑。
+function migrateAllToFirestore() {
+  if (!firestoreEnabled()) {
+    throw new Error('先把 FIRESTORE_PROJECT_ID 換成你的 Firebase 專案 ID，再執行這個函式。');
+  }
+  readAll(SHEETS.members).map(stripPassword).forEach((m) => firestoreSet('members', m.id, m));
+  readAll(SHEETS.venues).forEach((v) => firestoreSet('venues', v.id, v));
+  readAll(SHEETS.collections).forEach((c) => firestoreSet('collections', c.holder_id + '_' + c.bgg_id, c));
+  readAll(SHEETS.games).forEach((g) => firestoreSet('games', g.bgg_id, g));
+  readAll(SHEETS.events).forEach((e) => firestoreSet('events', e.event_id, e));
+  readAll(SHEETS.slots).forEach((s) => firestoreSet('slots', s.slot_id, s));
+  readAll(SHEETS.votes).forEach((v) => firestoreSet('votes', v.event_id + '_' + v.slot_id + '_' + v.member_id, v));
+  readAll(SHEETS.signups).forEach((s) => firestoreSet('signups', s.event_id + '_' + s.member_id, s));
+  Logger.log('Firestore 初始匯入完成。');
+}
+// --- Firestore POC end ------------------------------------------------------
+
 const SHEETS = {
   members: 'members',
   venues: 'venues',
@@ -392,6 +495,7 @@ function createEvent(payload) {
     note: payload.note || '',
   };
   appendObject(SHEETS.events, eventRow);
+  firestoreSet('events', eventId, eventRow);
 
   const slotRows = (payload.slots || []).map((s) => {
     const slotId = newId();
@@ -403,6 +507,7 @@ function createEvent(payload) {
       label: formatSlotLabel(s.date, s.period),
     };
     appendObject(SHEETS.slots, row);
+    firestoreSet('slots', slotId, row);
     return row;
   });
 
@@ -415,13 +520,15 @@ function vote(payload) {
   (voteList || []).forEach((v) => {
     const idx = findRowIndex(SHEETS.votes, (row) =>
       idEq(row.event_id, event_id) && idEq(row.slot_id, v.slot_id) && idEq(row.member_id, member_id));
+    const voteRow = { event_id, slot_id: v.slot_id, member_id, ok: v.ok, updated_at: nowIso() };
     if (idx === -1) {
-      appendObject(SHEETS.votes, {
-        event_id, slot_id: v.slot_id, member_id, ok: v.ok, updated_at: nowIso(),
-      });
+      appendObject(SHEETS.votes, voteRow);
     } else {
-      updateRowByIndex(SHEETS.votes, idx, { ok: v.ok, updated_at: nowIso() });
+      updateRowByIndex(SHEETS.votes, idx, { ok: voteRow.ok, updated_at: voteRow.updated_at });
     }
+    // Firestore 文件 id 直接用三個欄位組合，同一人同一時段的票永遠覆寫同一份
+    // 文件，天生就不會有 Sheets 那邊曾經發生過的重複列問題。
+    firestoreSet('votes', event_id + '_' + v.slot_id + '_' + member_id, voteRow);
   });
   invalidateBootstrapCache();
   return { ok: true };
@@ -441,6 +548,7 @@ function confirm(payload) {
     updates.venue_id = '';
   }
   updateRowByIndex(SHEETS.events, eventIdx, updates);
+  mirrorEventById(event_id);
 
   // 只採計目前還在名單上的成員、且每人只算最新一次投票（同一人同一時段偶爾
   // 會留下不只一筆紀錄，只認最新那筆，避免把已經改成「不行」的舊票也算進去）。
@@ -454,7 +562,9 @@ function confirm(payload) {
 
   okVoters.forEach((memberId) => {
     if (!existingMemberIds.has(String(memberId))) {
-      appendObject(SHEETS.signups, { event_id, member_id: memberId, joined_at: nowIso() });
+      const signupRow = { event_id, member_id: memberId, joined_at: nowIso() };
+      appendObject(SHEETS.signups, signupRow);
+      firestoreSet('signups', event_id + '_' + memberId, signupRow);
       existingMemberIds.add(String(memberId));
     }
   });
@@ -468,11 +578,14 @@ function toggleSignup(payload) {
   if (join) {
     const exists = findRowIndex(SHEETS.signups, (row) => idEq(row.event_id, event_id) && idEq(row.member_id, member_id));
     if (exists === -1) {
-      appendObject(SHEETS.signups, { event_id, member_id, joined_at: nowIso() });
+      const signupRow = { event_id, member_id, joined_at: nowIso() };
+      appendObject(SHEETS.signups, signupRow);
+      firestoreSet('signups', event_id + '_' + member_id, signupRow);
     }
   } else {
     const idxs = findAllRowIndexes(SHEETS.signups, (row) => idEq(row.event_id, event_id) && idEq(row.member_id, member_id));
     idxs.sort((a, b) => b - a).forEach((idx) => deleteRowByIndex(SHEETS.signups, idx));
+    firestoreDelete('signups', event_id + '_' + member_id);
   }
   invalidateBootstrapCache();
   return { ok: true };
@@ -495,6 +608,7 @@ function updateEventDetails(payload) {
     updates.venue_free_text = '';
   }
   updateRowByIndex(SHEETS.events, idx, updates);
+  mirrorEventById(event_id);
   invalidateBootstrapCache();
   return { ok: true };
 }
@@ -504,6 +618,14 @@ function cancelEvent(payload) {
   const idx = findRowIndex(SHEETS.events, (row) => idEq(row.event_id, event_id));
   if (idx === -1) throw new Error('EVENT_NOT_FOUND');
   updateRowByIndex(SHEETS.events, idx, { status: 'cancelled' });
+  mirrorEventById(event_id);
   invalidateBootstrapCache();
   return { ok: true };
+}
+
+// updateRowByIndex 只改欄位，不會回傳整列；要鏡像完整最新狀態到 Firestore，
+// 便宜行事直接重讀一次該列（readAll 有 request 內快取，寫入當下已經失效重讀）。
+function mirrorEventById(eventId) {
+  const row = readAll(SHEETS.events).find((r) => idEq(r.event_id, eventId));
+  if (row) firestoreSet('events', eventId, row);
 }
