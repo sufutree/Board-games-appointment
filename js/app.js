@@ -4,6 +4,7 @@ import { renderHome } from './views/home.js';
 import { renderNewEvent } from './views/newEvent.js';
 import { renderEvent } from './views/event.js';
 import { renderGames } from './views/games.js';
+import { renderAdmin } from './views/admin.js';
 
 const appEl = document.getElementById('app');
 
@@ -36,6 +37,7 @@ function parseRoute() {
   if (parts.length === 0) return { view: 'home' };
   if (parts[0] === 'new') return { view: 'new' };
   if (parts[0] === 'games') return { view: 'games' };
+  if (parts[0] === 'admin') return { view: 'admin' };
   if (parts[0] === 'event' && parts[1]) return { view: 'event', id: parts[1] };
   return { view: 'home' };
 }
@@ -49,6 +51,7 @@ export async function router() {
     else if (route.view === 'new') await renderNewEvent(appEl);
     else if (route.view === 'event') await renderEvent(appEl, route.id);
     else if (route.view === 'games') await renderGames(appEl);
+    else if (route.view === 'admin') await renderAdmin(appEl);
     else await renderHome(appEl);
   } catch (err) {
     console.error(err);
