@@ -5,5 +5,8 @@
   "description": "靜態前端沒有建置流程；這個 package.json 只是給 /api 底下的 Vercel Serverless Functions 用的依賴清單。",
   "dependencies": {
     "firebase-admin": "^14.0.0"
+  },
+  "overrides": {
+    "jose": "^4.15.5"
   }
 }
