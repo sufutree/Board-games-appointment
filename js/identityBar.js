@@ -2,8 +2,8 @@
 // 有這段邏輯；games.js 要做「使用者自建遊戲」也需要知道操作者是誰，所以
 // 把這段抽出來共用。
 import { memberById } from './store.js';
-import { getSelfId, clearSelfId, verifySecret, promptPassword } from './api.js';
-import { escapeHtml } from './app.js';
+import { getSelfId, clearSelfId, verifySecret, promptPassword, changeOwnPassword } from './api.js';
+import { escapeHtml, showToast } from './app.js';
 
 // container：要畫進去的 DOM 元素。members：可選的成員清單。
 // onChange：身分改變（登入成功或登出）後呼叫，通常用來 rerender 整個畫面。
@@ -13,9 +13,11 @@ export function renderIdentityBar(container, members, onChange) {
 
   if (selfIsValid) {
     const m = memberById(selfId);
+    const label = m ? m.name : selfId;
     container.innerHTML = `
       <div class="identity-bar">
-        <span>你是：<strong>${escapeHtml(m ? m.name : selfId)}</strong></span>
+        <span>你是：<strong>${escapeHtml(label)}</strong></span>
+        <a href="#" id="change-password-link">修改密碼</a>
         <a href="#" id="not-me-link">不是我？</a>
       </div>
     `;
@@ -23,6 +25,19 @@ export function renderIdentityBar(container, members, onChange) {
       e.preventDefault();
       await clearSelfId();
       onChange();
+    });
+    container.querySelector('#change-password-link').addEventListener('click', async (e) => {
+      e.preventDefault();
+      const current = await promptPassword(`${label}的目前密碼`, false);
+      if (current == null) return;
+      const next = await promptPassword(`${label}的新密碼（留空＝清空密碼）`, false);
+      if (next == null) return;
+      const result = await changeOwnPassword(current, next);
+      if (!result.ok) {
+        showToast(result.error === 'BAD_SECRET' ? '目前密碼不對，密碼沒有被更改。' : `更新失敗：${result.error}`);
+        return;
+      }
+      showToast('密碼已更新。');
     });
     return;
   }

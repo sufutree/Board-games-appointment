@@ -53,6 +53,21 @@ export async function renderAdmin(appEl) {
         <button type="button" id="reset-password-btn" class="btn btn-primary btn-sm">更新</button>
       `}
     </div>
+
+    <div class="card">
+      <div class="section-title">刪除成員</div>
+      ${members.length === 0 ? '<p class="card-meta">目前沒有成員。</p>' : `
+        <div class="form-group">
+          <label class="form-label" for="delete-member-select">成員</label>
+          <select class="form-control" id="delete-member-select">
+            ${members.map((m) => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`).join('')}
+          </select>
+        </div>
+        <p class="form-hint">會把這個人跟密碼一起刪掉。歷史投票/報名紀錄不會被清掉，只是之後畫面上會顯示查無此人。</p>
+        <p id="delete-member-error" class="error-text" hidden></p>
+        <button type="button" id="delete-member-btn" class="btn btn-danger btn-sm">刪除</button>
+      `}
+    </div>
   `;
 
   const masterInput = document.getElementById('admin-master');
@@ -131,6 +146,41 @@ export async function renderAdmin(appEl) {
       }
       showToast('密碼已更新。');
       document.getElementById('reset-member-password').value = '';
+    });
+  }
+
+  const deleteBtn = document.getElementById('delete-member-btn');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async () => {
+      const errorEl = document.getElementById('delete-member-error');
+      errorEl.hidden = true;
+      const memberId = document.getElementById('delete-member-select').value;
+      const member = members.find((m) => m.id === memberId);
+      if (!confirm(`確定要刪除「${member ? member.name : memberId}」嗎？這個動作沒辦法復原。`)) return;
+
+      deleteBtn.disabled = true;
+      deleteBtn.textContent = '處理中…';
+      let data;
+      try {
+        const res = await fetch('/api/adminDeleteMember', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ master_password: masterInput.value, member_id: memberId }),
+        });
+        data = await res.json();
+      } catch {
+        data = { ok: false, error: 'NETWORK_ERROR' };
+      }
+      deleteBtn.disabled = false;
+      deleteBtn.textContent = '刪除';
+      if (!data.ok) {
+        errorEl.textContent = ADMIN_ERROR_LABELS[data.error] || `刪除失敗：${data.error}`;
+        errorEl.hidden = false;
+        return;
+      }
+      await reloadDynamic();
+      showToast(`已刪除「${member ? member.name : memberId}」。`);
+      renderAdmin(appEl);
     });
   }
 }

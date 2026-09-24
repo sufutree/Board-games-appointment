@@ -59,6 +59,11 @@ export async function verifySecret(memberId, secret) {
   return loginAs(memberId, secret);
 }
 
+// 目前登入的身分自己改自己的密碼，要再輸一次目前密碼確認。
+export async function changeOwnPassword(currentPassword, newPassword) {
+  return callApi('setOwnPassword', { current_password: currentPassword, new_password: newPassword });
+}
+
 // 確保目前的登入身分就是 requiredMemberId，不是的話（或還沒登入）跳密碼框、
 // 用輸入的密碼登入。跟原本「密碼快取」的差別：現在同一時間只會有一個人是
 // 登入狀態，換人一定要重新輸入密碼（沒有快取多人密碼這件事了）。
