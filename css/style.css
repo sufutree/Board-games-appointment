@@ -426,20 +426,6 @@ table.vote-table th:first-child, table.vote-table td:first-child {
   max-width: 90vw;
 }
 
-/* Firestore POC 專用：體感測試的耗時小標籤，正式版不會有這段。 */
-.perf-badge {
-  position: fixed;
-  right: 12px;
-  bottom: 12px;
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  font-family: monospace;
-  z-index: 100;
-}
-
 .modal-overlay[hidden] {
   display: none;
 }

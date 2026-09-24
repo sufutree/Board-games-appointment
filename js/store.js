@@ -1,28 +1,6 @@
-// bootstrap 資料的載入、快取與合併邏輯。
-import { bootstrap } from './api.js';
-
-// Firestore POC：網址加 ?backend=firestore 時，讀取改走 Firestore（見
-// firestoreApi.js），寫入還是照舊打 Apps Script（見 api.js），單純用來比較
-// 「同一組資料，換一種讀法」的體感速度差異。動態 import，backend 沒切過去
-// 就完全不會載入 Firebase SDK，不影響正式路徑的載入重量。
-const BACKEND = new URLSearchParams(location.search).get('backend') === 'firestore' ? 'firestore' : 'appsscript';
-
-async function timedFetch() {
-  const t0 = performance.now();
-  const data = BACKEND === 'firestore'
-    ? await (await import('./firestoreApi.js')).firestoreBootstrap()
-    : await bootstrap();
-  const ms = Math.round(performance.now() - t0);
-  showPerfBadge(ms);
-  return data;
-}
-
-function showPerfBadge(ms) {
-  const el = document.getElementById('perf-badge');
-  if (!el) return;
-  el.hidden = false;
-  el.textContent = `資料載入：${ms}ms（來源：${BACKEND === 'firestore' ? 'Firestore' : 'Apps Script'}）`;
-}
+// bootstrap 資料的載入、快取與合併邏輯。資料庫已經全面搬到 Firestore，
+// Apps Script／Google Sheets 不再是任何讀寫的路徑。
+import { firestoreBootstrap } from './firebase.js';
 
 export const store = {
   loaded: false,
@@ -49,7 +27,7 @@ function notify() {
 export async function loadAll() {
   store.loadError = null;
   try {
-    const boot = await timedFetch();
+    const boot = await firestoreBootstrap();
     store.games = gamesArrayToMap(boot.games || []);
     store.members = boot.members || [];
     store.venues = boot.venues || [];
@@ -67,9 +45,9 @@ export async function loadAll() {
   }
 }
 
-// 寫入動作後呼叫，重新從 Apps Script 抓最新狀態（規模小，簡單優先於局部更新）。
+// 寫入動作後呼叫，重新從 Firestore 抓最新狀態（規模小，簡單優先於局部更新）。
 export async function reloadDynamic() {
-  const boot = await timedFetch();
+  const boot = await firestoreBootstrap();
   store.games = gamesArrayToMap(boot.games || []);
   store.members = boot.members || [];
   store.venues = boot.venues || [];

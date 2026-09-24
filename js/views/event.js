@@ -6,7 +6,7 @@ import {
   computePlayableList, filterGames, formatSlotLabel, allGamesWithHolders,
   formatPlayers, formatDuration, formatWeight, venueQualifies,
 } from '../rules.js';
-import { writeAction, promptPassword, getSelfId, setSelfId, clearSelfId, rememberSecret, verifySecret } from '../api.js';
+import { writeAction, promptPassword, getSelfId, clearSelfId, verifySecret } from '../api.js';
 import { escapeHtml, showToast } from '../app.js';
 
 const STATUS_LABEL = { open: '投票中', confirmed: '已定案', cancelled: '已取消' };
@@ -123,9 +123,9 @@ export async function renderEvent(appEl, eventId) {
           <a href="#" id="not-me-link">不是我？</a>
         </div>
       `;
-      document.getElementById('not-me-link').addEventListener('click', (e) => {
+      document.getElementById('not-me-link').addEventListener('click', async (e) => {
         e.preventDefault();
-        clearSelfId();
+        await clearSelfId();
         rerender();
       });
     } else {
@@ -164,8 +164,6 @@ export async function renderEvent(appEl, eventId) {
             result = await verifySecret(memberId, password);
           }
 
-          setSelfId(memberId);
-          rememberSecret(memberId, password);
           rerender();
         });
       });

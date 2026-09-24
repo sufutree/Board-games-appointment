@@ -119,6 +119,21 @@ function migrateAllToFirestore() {
   readAll(SHEETS.signups).forEach((s) => firestoreSet('signups', s.event_id + '_' + s.member_id, s));
   Logger.log('Firestore 初始匯入完成。');
 }
+
+// 一次性：把 members 分頁的密碼欄搬到 Firestore 的 member_secrets（一般
+// bootstrap／migrateAllToFirestore 都會把密碼欄位濾掉，這支函式是唯一會把
+// 密碼寫出去的地方，只能在 Apps Script 這種能直接讀 Sheet 原始資料的地方跑）。
+// 用途：徹底脫離 Apps Script 之後，Vercel Functions 改讀這裡驗證密碼。
+function migratePasswordsToFirestore() {
+  if (!firestoreEnabled()) {
+    throw new Error('先把 FIRESTORE_PROJECT_ID 換成你的 Firebase 專案 ID，再執行這個函式。');
+  }
+  const rows = readAll(SHEETS.members);
+  rows.forEach((m) => {
+    firestoreSet('member_secrets', m.id, { password: m.password != null ? String(m.password) : '' });
+  });
+  Logger.log('密碼搬遷完成，共 ' + rows.length + ' 筆。');
+}
 // --- Firestore POC end ------------------------------------------------------
 
 const SHEETS = {

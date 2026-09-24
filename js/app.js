@@ -1,4 +1,5 @@
 import { store, loadAll } from './store.js';
+import { waitForAuthReady } from './firebase.js';
 import { renderHome } from './views/home.js';
 import { renderNewEvent } from './views/newEvent.js';
 import { renderEvent } from './views/event.js';
@@ -15,7 +16,7 @@ export function showToast(msg) {
 }
 
 function renderLoading() {
-  appEl.innerHTML = `<div class="loading">載入中，請稍候…（首次載入 Apps Script 可能需要幾秒）</div>`;
+  appEl.innerHTML = `<div class="loading">載入中，請稍候…</div>`;
 }
 
 function renderLoadError() {
@@ -70,6 +71,7 @@ export function escapeHtml(str) {
 async function boot() {
   renderLoading();
   try {
+    await waitForAuthReady();
     await loadAll();
     await router();
   } catch (err) {
