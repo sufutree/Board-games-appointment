@@ -1,10 +1,36 @@
 rules_version = '2';
 
-// Firestore POC 專用規則。寫入只透過 apps-script/Code.gs 用 OAuth token（走 IAM，
-// 不受 Security Rules 限制）進行，所以這裡直接擋掉所有用戶端寫入，只開放讀取，
-// 跟現在 Sheets bootstrap 對所有訪客公開讀取的安全模型一致。
+// 全面脫離 Apps Script 之後的規則：
+// - member_secrets：存密碼，任何人都不能透過用戶端讀寫，只有 Vercel Functions
+//   用 Admin SDK（不受這份規則限制）能碰。
+// - votes / signups：高頻動作，瀏覽器直接寫，用 Firebase Auth 的登入身分
+//   （uid＝member_id）擋「只能改自己的票／自己報名退出」。
+// - 其他所有集合（members/venues/collections/games/events/slots）：公開讀取，
+//   寫入一律擋掉，只能透過 Vercel Functions 的 Admin SDK 寫（開團/定案/取消/
+//   編輯地點與指定遊戲都在那幾支 function 裡驗證身分後才寫）。
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    match /member_secrets/{memberId} {
+      allow read, write: if false;
+    }
+
+    match /votes/{voteId} {
+      allow read: if true;
+      allow create, update: if request.auth != null
+        && request.resource.data.member_id == request.auth.uid;
+      allow delete: if false;
+    }
+
+    match /signups/{signupId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.member_id == request.auth.uid;
+      allow delete: if request.auth != null
+        && resource.data.member_id == request.auth.uid;
+      allow update: if false;
+    }
+
     match /{document=**} {
       allow read: if true;
       allow write: if false;
