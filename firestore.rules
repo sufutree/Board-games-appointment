@@ -5,9 +5,13 @@ rules_version = '2';
 //   用 Admin SDK（不受這份規則限制）能碰。
 // - votes / signups：高頻動作，瀏覽器直接寫，用 Firebase Auth 的登入身分
 //   （uid＝member_id）擋「只能改自己的票／自己報名退出」。
-// - 其他所有集合（members/venues/collections/games/events/slots）：公開讀取，
-//   寫入一律擋掉，只能透過 Vercel Functions 的 Admin SDK 寫（開團/定案/取消/
-//   編輯地點與指定遊戲都在那幾支 function 裡驗證身分後才寫）。
+// - collections：「我也有這款」直接寫，只能新增/刪除自己（holder_id＝uid）
+//   名下的收藏，不能動別人的。
+// - game_corrections：使用者回報遊戲資料訂正，只能新增自己送出的（不能假冒
+//   別人送出），送出後不能自己改／刪，審核（approve/reject）只能透過
+//   Vercel Functions 的 Admin SDK。
+// - 其他所有集合（members/venues/games/events/slots）：公開讀取，寫入一律
+//   擋掉，只能透過 Vercel Functions 的 Admin SDK 寫。
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -29,6 +33,23 @@ service cloud.firestore {
       allow delete: if request.auth != null
         && resource.data.member_id == request.auth.uid;
       allow update: if false;
+    }
+
+    match /collections/{collectionId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.holder_id == request.auth.uid;
+      allow delete: if request.auth != null
+        && resource.data.holder_id == request.auth.uid;
+      allow update: if false;
+    }
+
+    match /game_corrections/{correctionId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.submitted_by == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow update, delete: if false;
     }
 
     match /{document=**} {

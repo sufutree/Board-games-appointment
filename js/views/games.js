@@ -1,6 +1,6 @@
 import { activeHolders, activeMembers, reloadDynamic } from '../store.js';
 import {
-  allGamesWithHolders, ownersOf, CATEGORY_GROUPS, CATEGORY_LABELS,
+  allGamesWithHolders, ownersOf, allOwnerships, CATEGORY_GROUPS, CATEGORY_LABELS,
   filterGames, formatPlayers, formatDuration, formatWeight,
 } from '../rules.js';
 import { writeAction, getSelfId } from '../api.js';
@@ -13,6 +13,17 @@ const BGG_ERROR_LABELS = {
   BGG_BUSY: 'BGG 目前排隊中，請稍等幾秒再試一次。',
   BGG_FETCH_FAILED: '跟 BGG 要資料失敗，請稍後再試。',
   UNAUTHENTICATED: '請先在上面選擇你的身分。',
+  MISSING_MEMBER_ID: '請先在上面選擇你的身分。',
+};
+
+const CORRECTION_FIELDS = {
+  name_zh: '中文名稱',
+  category: '分類',
+  min_players: '最少人數',
+  max_players: '最多人數',
+  playing_time: '遊玩時間（分鐘）',
+  is_expansion: '是否為擴充',
+  other: '其他（自由描述）',
 };
 
 const WEIGHT_BANDS = {
@@ -149,6 +160,8 @@ export async function renderGames(appEl) {
     const meta = item.meta;
     const owners = ownersOf(item.bggId);
     const expansions = allItems.filter((i) => i.meta.is_expansion && i.meta.parent_bgg_id === item.bggId);
+    const selfId = getSelfId();
+    const iHaveIt = !!selfId && allOwnerships().some((o) => o.holder_id === selfId && o.bgg_id === item.bggId);
 
     detailPanel.innerHTML = `
       <div class="game-detail">
@@ -173,8 +186,35 @@ export async function renderGames(appEl) {
           <div class="section-title" style="margin-top:16px;">擴充</div>
           ${expansions.map((ex) => `<div class="expansion-item">－ ${escapeHtml(ex.meta.name_zh || ex.meta.name_en || String(ex.bggId))}</div>`).join('')}
         ` : ''}
+        <div style="display:flex; gap:8px; margin-top:16px; flex-wrap:wrap;">
+          <button type="button" id="toggle-have-btn" class="btn btn-sm ${iHaveIt ? '' : 'btn-primary'}">${iHaveIt ? '✓ 我也有（點一下移除）' : '＋ 我也有這款'}</button>
+          <button type="button" id="report-correction-toggle" class="btn btn-sm btn-ghost">回報資料有誤</button>
+        </div>
+        <div id="correction-form" hidden></div>
       </div>
     `;
+
+    document.getElementById('toggle-have-btn').addEventListener('click', async () => {
+      if (!selfId) {
+        showToast(BGG_ERROR_LABELS.MISSING_MEMBER_ID);
+        return;
+      }
+      const member = activeMembers().find((m) => m.id === selfId);
+      const btn = document.getElementById('toggle-have-btn');
+      btn.disabled = true;
+      const result = await writeAction('toggleCollection', {
+        holder_id: selfId, bgg_id: item.bggId, name_zh: meta.name_zh, has: !iHaveIt,
+      }, selfId, member ? member.name : selfId);
+      btn.disabled = false;
+      if (!result.ok) {
+        if (result.error !== 'CANCELLED') showToast(`操作失敗：${result.error}`);
+        return;
+      }
+      await reloadDynamic();
+      renderDetail();
+    });
+
+    setupCorrectionForm(item, meta);
 
     document.getElementById('detail-close').addEventListener('click', () => {
       expandedId = null;
@@ -261,6 +301,142 @@ export async function renderGames(appEl) {
         formEl.hidden = true;
         toggleBtn.textContent = '＋ 新增遊戲';
         rerender();
+      });
+    }
+  }
+
+  // ---- 回報資料訂正（分類／中文名稱／人數…可能 BGG 抓錯或本來就有誤） ----
+  function setupCorrectionForm(item, meta) {
+    const toggleBtn = document.getElementById('report-correction-toggle');
+    const formEl = document.getElementById('correction-form');
+
+    toggleBtn.addEventListener('click', () => {
+      const opening = formEl.hidden;
+      formEl.hidden = !opening;
+      toggleBtn.textContent = opening ? '取消回報' : '回報資料有誤';
+      if (opening) renderForm();
+    });
+
+    function currentValueFor(field) {
+      if (field === 'name_zh') return meta.name_zh || '';
+      if (field === 'category') return meta.category ? (CATEGORY_LABELS[meta.category] || meta.category) : '';
+      if (field === 'min_players') return meta.min_players ?? '';
+      if (field === 'max_players') return meta.max_players ?? '';
+      if (field === 'playing_time') return meta.playing_time ?? '';
+      if (field === 'is_expansion') return meta.is_expansion ? '是' : '否';
+      return '';
+    }
+
+    function renderForm() {
+      formEl.innerHTML = `
+        <div class="form-group">
+          <label class="form-label" for="correction-field">要訂正的欄位</label>
+          <select class="form-control" id="correction-field">
+            ${Object.entries(CORRECTION_FIELDS).map(([k, label]) => `<option value="${k}">${escapeHtml(label)}</option>`).join('')}
+          </select>
+        </div>
+        <p class="card-meta" id="correction-current"></p>
+        <div class="form-group" id="correction-value-group"></div>
+        <div class="form-group">
+          <label class="form-label" for="correction-note">補充說明（選填）</label>
+          <textarea class="form-control" id="correction-note" placeholder="例如：BGG 官方頁面寫的是…、或這款其實是某某的擴充"></textarea>
+        </div>
+        <p id="correction-error" class="error-text" hidden></p>
+        <button type="button" id="correction-submit" class="btn btn-primary btn-sm">送出給管理員審核</button>
+      `;
+
+      const fieldSelect = document.getElementById('correction-field');
+      const currentEl = document.getElementById('correction-current');
+      const valueGroup = document.getElementById('correction-value-group');
+
+      function renderValueInput() {
+        const field = fieldSelect.value;
+        currentEl.textContent = field === 'other' ? '' : `目前的值：${currentValueFor(field) || '（空）'}`;
+        if (field === 'category') {
+          valueGroup.innerHTML = `
+            <label class="form-label" for="correction-value">建議改成</label>
+            <select class="form-control" id="correction-value">
+              ${CATEGORY_GROUPS.map((g) => `
+                <optgroup label="${escapeHtml(g.label)}">
+                  ${g.items.map((it) => `<option value="${it.code}">${escapeHtml(it.label)}</option>`).join('')}
+                </optgroup>
+              `).join('')}
+            </select>
+          `;
+        } else if (field === 'is_expansion') {
+          valueGroup.innerHTML = `
+            <label class="form-label" for="correction-value">建議改成</label>
+            <select class="form-control" id="correction-value">
+              <option value="true">是（擴充）</option>
+              <option value="false">否（本體）</option>
+            </select>
+          `;
+        } else if (field === 'other') {
+          valueGroup.innerHTML = '';
+        } else if (['min_players', 'max_players', 'playing_time'].includes(field)) {
+          valueGroup.innerHTML = `
+            <label class="form-label" for="correction-value">建議改成</label>
+            <input type="number" min="0" class="form-control" id="correction-value">
+          `;
+        } else {
+          valueGroup.innerHTML = `
+            <label class="form-label" for="correction-value">建議改成</label>
+            <input class="form-control" id="correction-value">
+          `;
+        }
+      }
+      fieldSelect.addEventListener('change', renderValueInput);
+      renderValueInput();
+
+      document.getElementById('correction-submit').addEventListener('click', async () => {
+        const errorEl = document.getElementById('correction-error');
+        errorEl.hidden = true;
+        const field = fieldSelect.value;
+        const note = document.getElementById('correction-note').value.trim();
+        const valueInput = document.getElementById('correction-value');
+        const suggestedValue = valueInput ? valueInput.value.trim() : '';
+
+        if (field !== 'other' && !suggestedValue) {
+          errorEl.textContent = '請輸入建議的新值。';
+          errorEl.hidden = false;
+          return;
+        }
+        if (field === 'other' && !note) {
+          errorEl.textContent = '請說明是哪裡有問題。';
+          errorEl.hidden = false;
+          return;
+        }
+
+        const selfId = getSelfId();
+        if (!selfId) {
+          errorEl.textContent = BGG_ERROR_LABELS.MISSING_MEMBER_ID;
+          errorEl.hidden = false;
+          return;
+        }
+        const member = activeMembers().find((m) => m.id === selfId);
+
+        const submitBtn = document.getElementById('correction-submit');
+        submitBtn.disabled = true;
+        submitBtn.textContent = '送出中…';
+        const result = await writeAction('submitCorrection', {
+          bgg_id: item.bggId,
+          field,
+          current_value: currentValueFor(field),
+          suggested_value: suggestedValue,
+          note,
+        }, selfId, member ? member.name : selfId);
+        submitBtn.disabled = false;
+        submitBtn.textContent = '送出給管理員審核';
+        if (!result.ok) {
+          if (result.error !== 'CANCELLED') {
+            errorEl.textContent = `送出失敗：${result.error}`;
+            errorEl.hidden = false;
+          }
+          return;
+        }
+        showToast('已送出，等管理員審核。');
+        formEl.hidden = true;
+        toggleBtn.textContent = '回報資料有誤';
       });
     }
   }

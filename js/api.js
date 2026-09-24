@@ -4,7 +4,7 @@
 //   複雜的動作）：打 /api/* 這幾支 Vercel Serverless Functions（api/ 目錄），
 //   帶目前登入身分的 Firebase ID token。
 // 「本人是誰」不再是密碼快取，而是真正的 Firebase 登入 session（見 firebase.js）。
-import { doc, setDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
+import { doc, collection, setDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { db, loginAs, getIdToken, getSelfId } from './firebase.js';
 
 export { getSelfId, clearSelfId } from './firebase.js';
@@ -91,7 +91,41 @@ export async function writeAction(action, payload, requiredMemberId, memberLabel
 
   if (action === 'vote') return doVote(payload);
   if (action === 'toggleSignup') return doToggleSignup(payload);
+  if (action === 'toggleCollection') return doToggleCollection(payload);
+  if (action === 'submitCorrection') return doSubmitCorrection(payload, requiredMemberId, memberLabel);
   return callApi(action, payload);
+}
+
+// 「我也有這款」／取消。holder_id 一律是自己（登入身分），不能幫別人登記。
+async function doToggleCollection(payload) {
+  const { holder_id, bgg_id, name_zh, has } = payload;
+  const docId = `${holder_id}_${bgg_id}`;
+  try {
+    if (has) {
+      await setDoc(doc(db, 'collections', docId), { holder_id, bgg_id, name_zh: name_zh || '', note: '' });
+    } else {
+      await deleteDoc(doc(db, 'collections', docId));
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.code || 'FIRESTORE_ERROR' };
+  }
+}
+
+// 回報遊戲資料可能有誤，送給 admin 審核。送出後不能自己再改。
+async function doSubmitCorrection(payload, submittedBy, submittedByName) {
+  const { bgg_id, field, current_value, suggested_value, note } = payload;
+  try {
+    const ref = doc(collection(db, 'game_corrections'));
+    await setDoc(ref, {
+      bgg_id, field, current_value: current_value ?? '', suggested_value, note: note || '',
+      submitted_by: submittedBy, submitted_by_name: submittedByName || submittedBy,
+      submitted_at: new Date().toISOString(), status: 'pending',
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.code || 'FIRESTORE_ERROR' };
+  }
 }
 
 async function doVote(payload) {
