@@ -1,9 +1,19 @@
-import { activeHolders } from '../store.js';
+import { activeHolders, activeMembers, reloadDynamic } from '../store.js';
 import {
   allGamesWithHolders, ownersOf, CATEGORY_GROUPS, CATEGORY_LABELS,
   filterGames, formatPlayers, formatDuration, formatWeight,
 } from '../rules.js';
-import { escapeHtml } from '../app.js';
+import { writeAction, getSelfId } from '../api.js';
+import { renderIdentityBar } from '../identityBar.js';
+import { escapeHtml, showToast } from '../app.js';
+
+const BGG_ERROR_LABELS = {
+  INVALID_BGG_ID: '看不出來是哪一款遊戲，請貼 BGG 網頁連結或直接輸入 BGG id。',
+  BGG_NOT_FOUND: 'BGG 上查無這個 id。',
+  BGG_BUSY: 'BGG 目前排隊中，請稍等幾秒再試一次。',
+  BGG_FETCH_FAILED: '跟 BGG 要資料失敗，請稍後再試。',
+  UNAUTHENTICATED: '請先在上面選擇你的身分。',
+};
 
 const WEIGHT_BANDS = {
   light: { max: 2.0, label: '輕度（≤2.0）' },
@@ -18,6 +28,13 @@ export async function renderGames(appEl) {
 
   appEl.innerHTML = `
     <h1 class="page-title">遊戲庫</h1>
+    <div id="identity-bar"></div>
+
+    <div class="card">
+      <button type="button" id="add-game-toggle" class="btn btn-sm">＋ 新增遊戲</button>
+      <div id="add-game-form" hidden></div>
+    </div>
+
     <div class="filter-bar">
       <input type="text" class="form-control" id="g-keyword" placeholder="搜尋中英文名稱">
       <select class="form-control" id="g-holder">
@@ -54,6 +71,10 @@ export async function renderGames(appEl) {
     <div id="game-count" class="card-meta"></div>
     <div id="game-grid"></div>
   `;
+
+  const rerender = () => renderGames(appEl);
+  renderIdentityBar(document.getElementById('identity-bar'), activeMembers(), rerender);
+  setupAddGameForm();
 
   const keywordInput = document.getElementById('g-keyword');
   const holderSelect = document.getElementById('g-holder');
@@ -168,4 +189,79 @@ export async function renderGames(appEl) {
 
   renderGrid();
   renderDetail();
+
+  // ---- 新增遊戲（貼 BGG 連結，任何登入身分都能用） ----
+  function setupAddGameForm() {
+    const toggleBtn = document.getElementById('add-game-toggle');
+    const formEl = document.getElementById('add-game-form');
+
+    toggleBtn.addEventListener('click', () => {
+      const opening = formEl.hidden;
+      formEl.hidden = !opening;
+      toggleBtn.textContent = opening ? '取消新增' : '＋ 新增遊戲';
+      if (opening) renderForm();
+    });
+
+    function renderForm() {
+      formEl.innerHTML = `
+        <div class="form-group">
+          <label class="form-label" for="new-game-input">BGG 連結或 BGG id</label>
+          <input class="form-control" id="new-game-input" placeholder="例如 https://boardgamegeek.com/boardgame/174430/ 或直接輸入 174430">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="new-game-name-zh">中文名稱（選填）</label>
+          <input class="form-control" id="new-game-name-zh" placeholder="沒填就先只顯示英文名稱">
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+          <input type="checkbox" id="new-game-add-collection" checked>
+          順便登記進我的收藏
+        </label>
+        <p id="new-game-error" class="error-text" hidden></p>
+        <button type="button" id="new-game-submit" class="btn btn-primary btn-sm">送出</button>
+      `;
+
+      document.getElementById('new-game-submit').addEventListener('click', async () => {
+        const errorEl = document.getElementById('new-game-error');
+        errorEl.hidden = true;
+        const bggInput = document.getElementById('new-game-input').value.trim();
+        if (!bggInput) {
+          errorEl.textContent = '請輸入 BGG 連結或 id。';
+          errorEl.hidden = false;
+          return;
+        }
+        const selfId = getSelfId();
+        if (!selfId) {
+          errorEl.textContent = '請先在上面選擇你的身分。';
+          errorEl.hidden = false;
+          return;
+        }
+        const payload = {
+          bgg_input: bggInput,
+          name_zh: document.getElementById('new-game-name-zh').value.trim() || undefined,
+          add_to_collection: document.getElementById('new-game-add-collection').checked,
+        };
+
+        const submitBtn = document.getElementById('new-game-submit');
+        submitBtn.disabled = true;
+        submitBtn.textContent = '查詢中…';
+        const member = activeMembers().find((m) => m.id === selfId);
+        const result = await writeAction('addGame', payload, selfId, member ? member.name : selfId);
+        if (!result.ok) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = '送出';
+          if (result.error !== 'CANCELLED') {
+            errorEl.textContent = BGG_ERROR_LABELS[result.error] || `新增失敗：${result.error}`;
+            errorEl.hidden = false;
+          }
+          return;
+        }
+
+        await reloadDynamic();
+        showToast(`已新增「${result.game.name_zh || result.game.name_en}」。`);
+        formEl.hidden = true;
+        toggleBtn.textContent = '＋ 新增遊戲';
+        rerender();
+      });
+    }
+  }
 }

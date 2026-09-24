@@ -6,7 +6,8 @@ import {
   computePlayableList, filterGames, formatSlotLabel, allGamesWithHolders,
   formatPlayers, formatDuration, formatWeight, venueQualifies,
 } from '../rules.js';
-import { writeAction, promptPassword, getSelfId, clearSelfId, verifySecret } from '../api.js';
+import { writeAction, getSelfId } from '../api.js';
+import { renderIdentityBar as renderSharedIdentityBar } from '../identityBar.js';
 import { escapeHtml, showToast } from '../app.js';
 
 const STATUS_LABEL = { open: '投票中', confirmed: '已定案', cancelled: '已取消' };
@@ -114,60 +115,7 @@ export async function renderEvent(appEl, eventId) {
 
   // ---- 身分列 ----
   function renderIdentityBar() {
-    const el = document.getElementById('identity-bar');
-    if (selfIsValid) {
-      const m = memberById(selfId);
-      el.innerHTML = `
-        <div class="identity-bar">
-          <span>你是：<strong>${escapeHtml(m.name)}</strong></span>
-          <a href="#" id="not-me-link">不是我？</a>
-        </div>
-      `;
-      document.getElementById('not-me-link').addEventListener('click', async (e) => {
-        e.preventDefault();
-        await clearSelfId();
-        rerender();
-      });
-    } else {
-      el.innerHTML = `
-        <div class="identity-bar" style="flex-direction: column; align-items: stretch;">
-          <span>請先點選你的名字：</span>
-          <div style="display:flex; flex-wrap:wrap; gap:8px;">
-            ${members.map((m) => `<button type="button" class="btn btn-sm" data-member-id="${escapeHtml(m.id)}">${escapeHtml(m.name)}</button>`).join('')}
-          </div>
-        </div>
-      `;
-      el.querySelectorAll('button[data-member-id]').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          const memberId = btn.dataset.memberId;
-          const member = memberById(memberId);
-          const label = member ? member.name : memberId;
-          const allButtons = el.querySelectorAll('button[data-member-id]');
-
-          let password = await promptPassword(label, false);
-          if (password == null) return; // 使用者取消，留在選擇畫面
-
-          // 送出後鎖住整排按鈕、把文字換成「驗證中…」，讓使用者清楚看到目前
-          // 正在等後端確認密碼，不能誤以為已經選好身分、跑去點下一步。
-          allButtons.forEach((b) => { b.disabled = true; });
-          btn.textContent = `${label}（驗證中…）`;
-
-          let result = await verifySecret(memberId, password);
-          while (!result.ok) {
-            password = await promptPassword(label, true);
-            if (password == null) {
-              allButtons.forEach((b) => { b.disabled = false; });
-              btn.textContent = label;
-              return; // 使用者取消，留在選擇畫面
-            }
-            btn.textContent = `${label}（驗證中…）`;
-            result = await verifySecret(memberId, password);
-          }
-
-          rerender();
-        });
-      });
-    }
+    renderSharedIdentityBar(document.getElementById('identity-bar'), members, rerender);
   }
 
   // ---- 投票表 ----
