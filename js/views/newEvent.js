@@ -15,6 +15,7 @@ export async function renderNewEvent(appEl) {
       { date: '', period: 'afternoon' },
     ],
     selectedGames: [],
+    venueType: 'physical',
   };
 
   appEl.innerHTML = `
@@ -39,6 +40,14 @@ export async function renderNewEvent(appEl) {
       </div>
 
       <div class="form-group">
+        <label class="form-label">地點類型</label>
+        <div class="period-toggle">
+          <button type="button" data-venue-type="physical" class="active">實體</button>
+          <button type="button" data-venue-type="online">線上</button>
+        </div>
+      </div>
+
+      <div class="form-group" id="physical-venue-group">
         <label class="form-label" for="f-venue">地點</label>
         <select class="form-control" id="f-venue">
           <option value="">尚未決定</option>
@@ -47,6 +56,18 @@ export async function renderNewEvent(appEl) {
         </select>
         <input class="form-control" id="f-venue-text" placeholder="輸入地點名稱" style="margin-top:8px; display:none;">
         <p id="venue-warning" class="error-text" hidden></p>
+      </div>
+
+      <div class="form-group" id="online-venue-group" style="display:none;">
+        <label class="form-label" for="f-online-platform">平台</label>
+        <select class="form-control" id="f-online-platform">
+          <option value="tts">Tabletop Simulator</option>
+          <option value="bga">Board Game Arena</option>
+          <option value="tabletopia">Tabletopia</option>
+          <option value="other">其他</option>
+        </select>
+        <label class="form-label" for="f-online-link" style="margin-top:8px;">連結／房號</label>
+        <input class="form-control" id="f-online-link" placeholder="貼 TTS Mod 連結、BGA 房號、Discord 語音連結…">
       </div>
 
       <div class="form-group">
@@ -73,6 +94,8 @@ export async function renderNewEvent(appEl) {
   const venueSelect = document.getElementById('f-venue');
   const venueTextInput = document.getElementById('f-venue-text');
   const venueWarningEl = document.getElementById('venue-warning');
+  const physicalVenueGroup = document.getElementById('physical-venue-group');
+  const onlineVenueGroup = document.getElementById('online-venue-group');
   const gameSearchInput = document.getElementById('f-game-search');
   const gamePickerResults = document.getElementById('game-picker-results');
   const selectedGamesEl = document.getElementById('selected-games');
@@ -124,13 +147,30 @@ export async function renderNewEvent(appEl) {
 
   renderSlotRows();
 
+  document.querySelectorAll('button[data-venue-type]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.venueType = btn.dataset.venueType;
+      document.querySelectorAll('button[data-venue-type]').forEach((b) => {
+        b.classList.toggle('active', b.dataset.venueType === state.venueType);
+      });
+      physicalVenueGroup.style.display = state.venueType === 'online' ? 'none' : '';
+      onlineVenueGroup.style.display = state.venueType === 'online' ? '' : 'none';
+      updateVenueWarning();
+    });
+  });
+
   venueSelect.addEventListener('change', () => {
     venueTextInput.style.display = venueSelect.value === '__other__' ? '' : 'none';
     updateVenueWarning();
   });
   creatorSelect.addEventListener('change', updateVenueWarning);
 
+  // 線上團沒有「誰能開這個場地」的概念，警示只對實體場地有意義。
   function updateVenueWarning() {
+    if (state.venueType === 'online') {
+      venueWarningEl.hidden = true;
+      return;
+    }
     const venue = venues.find((v) => v.id === venueSelect.value);
     if (!venue || !creatorSelect.value || venueQualifies(venue, [creatorSelect.value])) {
       venueWarningEl.hidden = true;
@@ -227,7 +267,13 @@ export async function renderNewEvent(appEl) {
       note: document.getElementById('f-note').value.trim() || undefined,
     };
 
-    if (venueSelect.value === '__other__') {
+    if (state.venueType === 'online') {
+      const link = document.getElementById('f-online-link').value.trim();
+      if (!link) return showError('請輸入連結或房號。');
+      payload.venue_type = 'online';
+      payload.online_platform = document.getElementById('f-online-platform').value;
+      payload.venue_free_text = link;
+    } else if (venueSelect.value === '__other__') {
       const freeText = venueTextInput.value.trim();
       if (!freeText) return showError('請輸入地點名稱，或改選「尚未決定」。');
       payload.venue_free_text = freeText;

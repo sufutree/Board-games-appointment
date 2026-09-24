@@ -2,7 +2,14 @@ import { store, activeMembers, slotsOfEvent, votesOfEvent, signupsOfEvent, venue
 import { isEventEnded } from '../rules.js';
 import { escapeHtml } from '../app.js';
 
+const PLATFORM_LABELS = {
+  tts: 'Tabletop Simulator', bga: 'Board Game Arena', tabletopia: 'Tabletopia', other: '線上',
+};
+
 function venueLabel(event) {
+  if (event.venue_type === 'online') {
+    return `線上・${PLATFORM_LABELS[event.online_platform] || PLATFORM_LABELS.other}`;
+  }
   if (event.venue_id) {
     const v = venueById(event.venue_id);
     return v ? v.name : '（場地已刪除）';

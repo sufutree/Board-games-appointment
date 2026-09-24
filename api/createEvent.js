@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   const uid = await requireAuth(req, res);
   if (!uid) return;
 
-  const { title, venue_id, venue_free_text, game_bgg_ids, note, slots } = req.body || {};
+  const { title, venue_id, venue_free_text, venue_type, online_platform, game_bgg_ids, note, slots } = req.body || {};
 
   const eventId = newId();
   const eventRow = {
@@ -17,8 +17,10 @@ export default async function handler(req, res) {
     creator_id: uid,
     title: title || '',
     status: 'open',
-    venue_id: venue_id || '',
+    venue_type: venue_type === 'online' ? 'online' : 'physical',
+    venue_id: venue_type === 'online' ? '' : (venue_id || ''),
     venue_free_text: venue_free_text || '',
+    online_platform: venue_type === 'online' ? (online_platform || 'other') : '',
     confirmed_slot_id: '',
     game_bgg_ids: (game_bgg_ids || []).join(','),
     note: note || '',

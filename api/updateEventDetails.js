@@ -7,22 +7,31 @@ export default async function handler(req, res) {
   const uid = await requireAuth(req, res);
   if (!uid) return;
 
-  const { event_id, game_bgg_ids, venue_id, venue_free_text } = req.body || {};
+  const { event_id, game_bgg_ids, venue_id, venue_free_text, venue_type, online_platform } = req.body || {};
   const ref = db.collection('events').doc(event_id);
   const snap = await ref.get();
   if (!snap.exists) return res.status(404).json({ ok: false, error: 'EVENT_NOT_FOUND' });
   if (snap.data().creator_id !== uid) return res.status(403).json({ ok: false, error: 'FORBIDDEN' });
 
   const updates = { game_bgg_ids: (game_bgg_ids || []).join(',') };
-  if (venue_id) {
-    updates.venue_id = venue_id;
-    updates.venue_free_text = '';
-  } else if (venue_free_text) {
-    updates.venue_free_text = venue_free_text;
+  if (venue_type === 'online') {
+    updates.venue_type = 'online';
+    updates.online_platform = online_platform || 'other';
+    updates.venue_free_text = venue_free_text || '';
     updates.venue_id = '';
   } else {
-    updates.venue_id = '';
-    updates.venue_free_text = '';
+    updates.venue_type = 'physical';
+    updates.online_platform = '';
+    if (venue_id) {
+      updates.venue_id = venue_id;
+      updates.venue_free_text = '';
+    } else if (venue_free_text) {
+      updates.venue_free_text = venue_free_text;
+      updates.venue_id = '';
+    } else {
+      updates.venue_id = '';
+      updates.venue_free_text = '';
+    }
   }
   await ref.update(updates);
 

@@ -33,6 +33,29 @@ function venueDisplay(event) {
   return '尚未決定';
 }
 
+const PLATFORM_LABELS = {
+  tts: 'Tabletop Simulator', bga: 'Board Game Arena', tabletopia: 'Tabletopia', other: '其他線上平台',
+};
+
+function isUrl(text) {
+  return /^https?:\/\//i.test(text);
+}
+
+// 回傳可以直接塞進畫面的 HTML（自己處理逃逸）；線上團會把連結變成可點擊、
+// 標出平台名稱，實體地點就是 venueDisplay() 的純文字版本。
+function venueDisplayHtml(event) {
+  if (event.venue_type === 'online') {
+    const platform = PLATFORM_LABELS[event.online_platform] || PLATFORM_LABELS.other;
+    const text = event.venue_free_text || '';
+    if (!text) return `線上・${escapeHtml(platform)}（連結尚未提供）`;
+    if (isUrl(text)) {
+      return `線上・${escapeHtml(platform)}・<a href="${escapeHtml(text)}" target="_blank" rel="noopener">${escapeHtml(text)}</a>`;
+    }
+    return `線上・${escapeHtml(platform)}・${escapeHtml(text)}`;
+  }
+  return escapeHtml(venueDisplay(event));
+}
+
 export async function renderEvent(appEl, eventId) {
   const event = eventById(eventId);
   if (!event) {
@@ -75,7 +98,7 @@ export async function renderEvent(appEl, eventId) {
         <span class="badge badge-${event.status}">${STATUS_LABEL[event.status] || event.status}</span>
       </div>
       <div class="card-meta">發起人：${escapeHtml(creator ? creator.name : '未知')}</div>
-      <div class="card-meta">地點：${escapeHtml(venueDisplay(event))}</div>
+      <div class="card-meta">地點：${venueDisplayHtml(event)}</div>
       ${event.note ? `<div class="card-meta">備註：${escapeHtml(event.note)}</div>` : ''}
     </div>
 
@@ -221,7 +244,7 @@ export async function renderEvent(appEl, eventId) {
         `).join('')}
       </div>
       ${venueAlreadySet ? `
-        <p class="card-meta">地點：${escapeHtml(venueDisplay(event))}</p>
+        <p class="card-meta">地點：${venueDisplayHtml(event)}</p>
       ` : `
         <div class="form-group">
           <label class="form-label" for="confirm-venue">地點</label>
@@ -384,7 +407,7 @@ export async function renderEvent(appEl, eventId) {
 
     function renderCollapsed() {
       el.innerHTML = `
-        <p class="card-meta">地點：${escapeHtml(venueDisplay(event))}</p>
+        <p class="card-meta">地點：${venueDisplayHtml(event)}</p>
         <p class="card-meta">指定遊戲：${selectedGames.length ? escapeHtml(selectedGames.map((g) => g.name).join('、')) : '未指定'}</p>
         <button type="button" id="edit-details-btn" class="btn btn-sm">編輯地點與指定遊戲</button>
       `;
@@ -393,16 +416,35 @@ export async function renderEvent(appEl, eventId) {
 
     function renderExpanded() {
       const isOtherVenue = !event.venue_id && !!event.venue_free_text;
+      let venueType = event.venue_type === 'online' ? 'online' : 'physical';
       el.innerHTML = `
         <div class="form-group">
+          <label class="form-label">地點類型</label>
+          <div class="period-toggle">
+            <button type="button" data-venue-type="physical" class="${venueType === 'physical' ? 'active' : ''}">實體</button>
+            <button type="button" data-venue-type="online" class="${venueType === 'online' ? 'active' : ''}">線上</button>
+          </div>
+        </div>
+        <div class="form-group" id="edit-physical-venue-group" style="display:${venueType === 'online' ? 'none' : ''};">
           <label class="form-label" for="edit-venue">地點</label>
           <select class="form-control" id="edit-venue">
             <option value="">尚未決定</option>
             ${activeVenues().map((v) => `<option value="${escapeHtml(v.id)}" ${event.venue_id === v.id ? 'selected' : ''}>${escapeHtml(v.name)}</option>`).join('')}
             <option value="__other__" ${isOtherVenue ? 'selected' : ''}>其他（自行輸入）</option>
           </select>
-          <input class="form-control" id="edit-venue-text" placeholder="輸入地點名稱" value="${escapeHtml(event.venue_free_text || '')}" style="margin-top:8px; display:${isOtherVenue ? '' : 'none'};">
+          <input class="form-control" id="edit-venue-text" placeholder="輸入地點名稱" value="${escapeHtml(venueType === 'physical' ? (event.venue_free_text || '') : '')}" style="margin-top:8px; display:${isOtherVenue ? '' : 'none'};">
           <p id="edit-venue-warning" class="error-text" hidden></p>
+        </div>
+        <div class="form-group" id="edit-online-venue-group" style="display:${venueType === 'online' ? '' : 'none'};">
+          <label class="form-label" for="edit-online-platform">平台</label>
+          <select class="form-control" id="edit-online-platform">
+            <option value="tts" ${event.online_platform === 'tts' ? 'selected' : ''}>Tabletop Simulator</option>
+            <option value="bga" ${event.online_platform === 'bga' ? 'selected' : ''}>Board Game Arena</option>
+            <option value="tabletopia" ${event.online_platform === 'tabletopia' ? 'selected' : ''}>Tabletopia</option>
+            <option value="other" ${!event.online_platform || event.online_platform === 'other' ? 'selected' : ''}>其他</option>
+          </select>
+          <label class="form-label" for="edit-online-link" style="margin-top:8px;">連結／房號</label>
+          <input class="form-control" id="edit-online-link" placeholder="貼 TTS Mod 連結、BGA 房號、Discord 語音連結…" value="${escapeHtml(venueType === 'online' ? (event.venue_free_text || '') : '')}">
         </div>
         <div class="form-group">
           <label class="form-label" for="edit-game-search">指定遊戲</label>
@@ -420,11 +462,29 @@ export async function renderEvent(appEl, eventId) {
       const venueSel = document.getElementById('edit-venue');
       const venueText = document.getElementById('edit-venue-text');
       const venueWarningEl = document.getElementById('edit-venue-warning');
+      const physicalGroup = document.getElementById('edit-physical-venue-group');
+      const onlineGroup = document.getElementById('edit-online-venue-group');
       const gameSearchInput = document.getElementById('edit-game-search');
       const gamePickerResults = document.getElementById('edit-game-picker-results');
       const selectedGamesEl = document.getElementById('edit-selected-games');
 
+      document.querySelectorAll('button[data-venue-type]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          venueType = btn.dataset.venueType;
+          document.querySelectorAll('button[data-venue-type]').forEach((b) => {
+            b.classList.toggle('active', b.dataset.venueType === venueType);
+          });
+          physicalGroup.style.display = venueType === 'online' ? 'none' : '';
+          onlineGroup.style.display = venueType === 'online' ? '' : 'none';
+          updateVenueWarning();
+        });
+      });
+
       function updateVenueWarning() {
+        if (venueType === 'online') {
+          venueWarningEl.hidden = true;
+          return;
+        }
         const venue = activeVenues().find((v) => v.id === venueSel.value);
         if (!venue) {
           venueWarningEl.hidden = true;
@@ -521,7 +581,17 @@ export async function renderEvent(appEl, eventId) {
           event_id: event.event_id,
           game_bgg_ids: selectedGames.map((g) => g.bggId),
         };
-        if (venueSel.value === '__other__') {
+        if (venueType === 'online') {
+          const link = document.getElementById('edit-online-link').value.trim();
+          if (!link) {
+            errorEl.textContent = '請輸入連結或房號。';
+            errorEl.hidden = false;
+            return;
+          }
+          payload.venue_type = 'online';
+          payload.online_platform = document.getElementById('edit-online-platform').value;
+          payload.venue_free_text = link;
+        } else if (venueSel.value === '__other__') {
           const t = venueText.value.trim();
           if (!t) {
             errorEl.textContent = '請輸入地點名稱，或改選「尚未決定」。';
