@@ -37,7 +37,7 @@ const MASTER_PASSWORD = 'sufutree';
 //      組 token 的用法偵測不到，要手動加這行）。
 //   5. 存檔、部署新版本後，在編輯器選 migrateAllToFirestore 執行一次，把現有
 //      Sheets 資料匯入 Firestore 當初始快照。之後所有寫入動作會自動鏡像。
-const FIRESTORE_PROJECT_ID = 'PASTE_ME';
+const FIRESTORE_PROJECT_ID = 'board-games-appointmen';
 
 function firestoreEnabled() {
   return FIRESTORE_PROJECT_ID && FIRESTORE_PROJECT_ID !== 'PASTE_ME';
