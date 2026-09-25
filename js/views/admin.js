@@ -26,6 +26,25 @@ function correctionValueLabel(field, value) {
   return value;
 }
 
+// 主密碼存在 sessionStorage：每個成功動作都會整頁重畫一次（renderAdmin
+// 重寫 innerHTML），如果不存起來，密碼欄每次都會被清空，變成每按一次
+// 按鈕就要重打一次密碼。分頁關閉就會清掉，不是永久記住。
+const MASTER_STORAGE_KEY = 'bgt_admin_master';
+function getSavedMaster() {
+  try {
+    return sessionStorage.getItem(MASTER_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+function saveMaster(value) {
+  try {
+    sessionStorage.setItem(MASTER_STORAGE_KEY, value);
+  } catch {
+    // ignore
+  }
+}
+
 export async function renderAdmin(appEl) {
   const members = activeMembers();
   const venues = activeVenues();
@@ -40,7 +59,7 @@ export async function renderAdmin(appEl) {
     <h1 class="page-title">管理</h1>
     <div class="form-group">
       <label class="form-label" for="admin-master">主密碼</label>
-      <input type="password" class="form-control" id="admin-master" placeholder="輸入主密碼才能操作" autocomplete="off">
+      <input type="password" class="form-control" id="admin-master" placeholder="輸入主密碼才能操作" autocomplete="off" value="${escapeHtml(getSavedMaster())}">
     </div>
 
     <div class="card">
@@ -168,6 +187,7 @@ export async function renderAdmin(appEl) {
   `;
 
   const masterInput = document.getElementById('admin-master');
+  masterInput.addEventListener('input', () => saveMaster(masterInput.value));
 
   document.querySelectorAll('button[data-correction-id]').forEach((btn) => {
     btn.addEventListener('click', async () => {
