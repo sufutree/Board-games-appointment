@@ -201,7 +201,9 @@ function isTrue(v) {
 // ---- 標籤 helper（取代原本單選的 category） ----
 
 export function activeTags() {
-  return store.tags.filter((t) => isTrue(t.active));
+  return store.tags
+    .filter((t) => isTrue(t.active))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
 
 export function tagLabel(code) {
@@ -209,7 +211,10 @@ export function tagLabel(code) {
   return t ? t.label : code;
 }
 
-// 依 group_code 分組，picker／篩選介面用。沒有對應群組的標籤歸進「其他」。
+// 依 group_code 分組，picker／篩選介面用，組內照 order 排序（相近的標籤
+// 排在一起是使用者指定的順序，不是字母或建立時間）。沒有對應群組的標籤
+// 歸進「其他」。activeTags() 已經排過序，Map 的插入順序讓群組本身也會
+// 照第一個成員的 order 出現（機制在前、主題在後）。
 export function tagGroups() {
   const groups = new Map();
   activeTags().forEach((t) => {

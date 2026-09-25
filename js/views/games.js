@@ -410,7 +410,6 @@ export async function renderGames(appEl) {
             <input class="form-control" id="new-tag-name" placeholder="新標籤名稱">
             <select class="form-control" id="new-tag-group" style="margin-top:8px;">
               ${tagGroups().map((g) => `<option value="${g.code}" data-label="${escapeHtml(g.label)}">${escapeHtml(g.label)}</option>`).join('')}
-              <option value="other" data-label="其他">其他</option>
             </select>
           `;
           return;

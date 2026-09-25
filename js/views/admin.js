@@ -148,7 +148,6 @@ export async function renderAdmin(appEl) {
         <label class="form-label" for="new-tag-group-select">分組</label>
         <select class="form-control" id="new-tag-group-select">
           ${tagGroupList.map((g) => `<option value="${escapeHtml(g.code)}" data-label="${escapeHtml(g.label)}">${escapeHtml(g.label)}</option>`).join('')}
-          <option value="other" data-label="其他">其他</option>
         </select>
       </div>
       <p id="add-tag-error" class="error-text" hidden></p>

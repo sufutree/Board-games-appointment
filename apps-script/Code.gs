@@ -138,28 +138,64 @@ function migratePasswordsToFirestore() {
 
 // ---- 分類 → 標籤（多選）搬遷 ------------------------------------------------
 
-// 跟 js/rules.js 的 CATEGORY_GROUPS 內容一致，這裡是唯一一次性寫進 Firestore
-// tags 集合的地方，之後 tags 就是 Firestore 說了算，這份常數不會再被讀。
-const LEGACY_CATEGORY_GROUPS = [
-  { code: 'S', label: '策略', items: [
-    { code: 'S-WP', label: '工擺' }, { code: 'S-DC', label: '牌組引擎建構' },
-    { code: 'S-TR', label: '旅行區域控制' }, { code: 'S-4X', label: '4X或戰鬥' },
-    { code: 'S-EC', label: '經貿競標' }, { code: 'S-AC', label: '行動選擇' },
+// 標籤大分類只留「機制」「主題」兩種，小標籤內容跟順序是使用者指定的
+// （相近的排在一起），這裡是唯一一次性寫進 Firestore tags 集合的地方，
+// 之後 tags 就是 Firestore 說了算（可以在 admin 後台增減），這份常數
+// 不會再被讀。
+const NEW_TAG_GROUPS = [
+  { code: 'mechanism', label: '機制', items: [
+    '工人擺放', '引擎構築', '牌組構築', '手牌管理', '資源管理', '股市經濟', '合約',
+    '版圖拼放', '區域控制', '網路構建', '點對點移動', '探索', '輪盤機制', '時間軌',
+    '輪抽', '拍賣競標', '談判交易', '袋裝構築', '成套收集', '吃墩',
+    '陣營', '心機', '秘密行動', '吹牛',
+    '擲骰驅動', '運氣', '紙筆塗鴉',
+    '巧手', '反應', '邏輯', '解謎推理', '文字聯想', '抽象棋', '競速',
+    '傳承機制', '非對稱', '多變能力',
   ] },
-  { code: 'P', label: '派對', items: [
-    { code: 'P-CS', label: '陣營心機' }, { code: 'P-C', label: '卡牌' },
-    { code: 'P-H', label: '技巧' }, { code: 'P-CR', label: '創意' },
-  ] },
-  { code: 'F', label: '家庭', items: [
-    { code: 'F-T', label: '雙人' }, { code: 'F-C', label: '卡牌' },
-    { code: 'F-S', label: '輕策略' }, { code: 'F-TL', label: '板塊拼放' },
-    { code: 'F-A', label: '抽象' }, { code: 'F-D', label: '骰子' },
-  ] },
-  { code: 'C', label: '兒童', items: [
-    { code: 'C-R', label: '反應' }, { code: 'C-H', label: '巧手' },
-    { code: 'C-M', label: '記憶' }, { code: 'C-S', label: '兒童策略' },
+  { code: 'theme', label: '主題', items: [
+    '家庭', '派對', '兒童', '策略', '美式', '小品', '情境', '角色扮演',
+    '魔法', '科幻', '太空', '童話', '恐怖', '宗教',
+    '歷史', '中世紀', '文化', '武俠', '軍事', '台灣原創', '動漫', '視覺',
+    '自然生態', '農場', '工廠', '旅遊', '餐廳', '海洋', '交通工具',
   ] },
 ];
+
+// 一次性：換掉整套標籤分類（原本 4 大類 20 個換成機制/主題 65 個）。
+// 舊標籤刪掉、已經掛在遊戲上的舊標籤也清空（新舊體系對不起來，沒辦法
+// 一一對應搬過去），换上新的一批，帶 order 讓畫面能照使用者指定的順序
+// 顯示（Firestore 查詢不保證回傳順序）。
+function migrateToNewTagTaxonomy() {
+  if (!firestoreEnabled()) throw new Error('先設定 FIRESTORE_PROJECT_ID。');
+
+  const oldTags = firestoreGetAll('tags');
+  oldTags.forEach((t) => firestoreDelete('tags', t._id));
+  Logger.log('舊標籤刪除完成，共 ' + oldTags.length + ' 筆。');
+
+  // firestoreSet 用 PATCH 不帶 updateMask，等於整份覆蓋，所以要把完整的
+  // 原始欄位帶回去、只換 tags，不能只丟 { tags: [] } 過去（那樣會把這款
+  // 遊戲其他欄位全部清空）。
+  const games = firestoreGetAll('games');
+  games.forEach((g) => {
+    if (g.tags && g.tags.length > 0) {
+      const row = Object.assign({}, g, { tags: [] });
+      delete row._id;
+      firestoreSet('games', String(g.bgg_id), row);
+    }
+  });
+  Logger.log('遊戲上的舊標籤已清空，共檢查 ' + games.length + ' 款。');
+
+  let order = 0;
+  NEW_TAG_GROUPS.forEach((group) => {
+    group.items.forEach((label) => {
+      firestoreSet('tags', label, {
+        code: label, label: label, group_code: group.code, group_label: group.label,
+        order: order, active: true,
+      });
+      order += 1;
+    });
+  });
+  Logger.log('新標籤清單匯入完成，共 ' + order + ' 筆。');
+}
 
 // Firestore REST 回傳的 fields 是型別包裝過的值，讀回來要轉正常 JS 值。
 function fromFirestoreValue(v) {
