@@ -174,11 +174,12 @@ export async function renderAdmin(appEl) {
       btn.disabled = true;
       let data;
       try {
-        const res = await fetch('/api/adminReviewCorrection', {
+        const res = await fetch('/api/admin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             master_password: masterInput.value,
+            op: 'reviewCorrection',
             correction_id: btn.dataset.correctionId,
             action: btn.dataset.correctionAction,
           }),
@@ -203,11 +204,12 @@ export async function renderAdmin(appEl) {
       btn.disabled = true;
       let data;
       try {
-        const res = await fetch('/api/adminReviewVenueCollection', {
+        const res = await fetch('/api/admin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             master_password: masterInput.value,
+            op: 'reviewVenueCollection',
             request_id: btn.dataset.venuereqId,
             action: btn.dataset.venuereqAction,
           }),
@@ -243,10 +245,10 @@ export async function renderAdmin(appEl) {
     btn.textContent = '處理中…';
     let data;
     try {
-      const res = await fetch('/api/adminAddVenue', {
+      const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ master_password: masterInput.value, name, unlock_member_ids: unlockIds }),
+        body: JSON.stringify({ master_password: masterInput.value, op: 'addVenue', name, unlock_member_ids: unlockIds }),
       });
       data = await res.json();
     } catch {
@@ -277,10 +279,10 @@ export async function renderAdmin(appEl) {
       deleteVenueBtn.textContent = '處理中…';
       let data;
       try {
-        const res = await fetch('/api/adminDeleteVenue', {
+        const res = await fetch('/api/admin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ master_password: masterInput.value, venue_id: venueId }),
+          body: JSON.stringify({ master_password: masterInput.value, op: 'deleteVenue', venue_id: venueId }),
         });
         data = await res.json();
       } catch {
@@ -314,11 +316,12 @@ export async function renderAdmin(appEl) {
     btn.textContent = '處理中…';
     let data;
     try {
-      const res = await fetch('/api/adminAddMember', {
+      const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           master_password: masterInput.value,
+          op: 'addMember',
           member_id: name,
           name,
           password: document.getElementById('new-member-password').value,
@@ -351,11 +354,12 @@ export async function renderAdmin(appEl) {
       resetBtn.textContent = '處理中…';
       let data;
       try {
-        const res = await fetch('/api/adminSetPassword', {
+        const res = await fetch('/api/admin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             master_password: masterInput.value,
+            op: 'setPassword',
             member_id: memberId,
             new_password: document.getElementById('reset-member-password').value,
           }),
@@ -389,10 +393,10 @@ export async function renderAdmin(appEl) {
       deleteBtn.textContent = '處理中…';
       let data;
       try {
-        const res = await fetch('/api/adminDeleteMember', {
+        const res = await fetch('/api/admin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ master_password: masterInput.value, member_id: memberId }),
+          body: JSON.stringify({ master_password: masterInput.value, op: 'deleteMember', member_id: memberId }),
         });
         data = await res.json();
       } catch {

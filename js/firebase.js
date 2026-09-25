@@ -36,15 +36,15 @@ export function clearSelfId() {
   return signOut(auth);
 }
 
-// 密碼驗證＋登入。跟 /api/login 換一個 Firebase 自訂權杖，再拿去換成真正的
-// 登入狀態（signInWithCustomToken）。取代原本 apps-script 的 verifySecret。
+// 密碼驗證＋登入。跟 /api/action（action: 'login'）換一個 Firebase 自訂
+// 權杖，再拿去換成真正的登入狀態（signInWithCustomToken）。
 export async function loginAs(memberId, secret) {
   let data;
   try {
-    const res = await fetch('/api/login', {
+    const res = await fetch('/api/action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ member_id: memberId, secret }),
+      body: JSON.stringify({ action: 'login', member_id: memberId, secret }),
     });
     data = await res.json();
   } catch {

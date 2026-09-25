@@ -1,8 +1,12 @@
 // 寫入動作的統一入口。資料庫已經全面搬到 Firestore：
-// - vote / toggleSignup（高頻動作）：瀏覽器直接寫 Firestore，不再打任何後端。
-// - createEvent / confirm / cancelEvent / updateEventDetails（低頻、邏輯較
-//   複雜的動作）：打 /api/* 這幾支 Vercel Serverless Functions（api/ 目錄），
-//   帶目前登入身分的 Firebase ID token。
+// - vote / toggleSignup / toggleCollection / submitCorrection /
+//   submitVenueCollection（高頻或使用者自助動作）：瀏覽器直接寫 Firestore，
+//   不再打任何後端。
+// - createEvent / confirm / cancelEvent / updateEventDetails / setOwnPassword /
+//   addGame（低頻、邏輯較複雜的動作）：全部合併打 /api/action.js 這一支
+//   Vercel Serverless Function（Vercel Hobby 方案一次部署最多 12 支
+//   function，所以不是每個動作各自開一支），帶目前登入身分的 Firebase ID
+//   token，用 body 的 action 欄位分派。
 // 「本人是誰」不再是密碼快取，而是真正的 Firebase 登入 session（見 firebase.js）。
 import { doc, collection, setDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { db, loginAs, getIdToken, getSelfId } from './firebase.js';
@@ -180,10 +184,10 @@ async function callApi(action, payload) {
   const token = await getIdToken();
   if (!token) return { ok: false, error: 'UNAUTHENTICATED' };
   try {
-    const res = await fetch(`/api/${action}`, {
+    const res = await fetch('/api/action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ action, ...payload }),
     });
     return await res.json();
   } catch {
