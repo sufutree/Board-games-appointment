@@ -1,6 +1,6 @@
-import { activeHolders, activeMembers, reloadDynamic } from '../store.js';
+import { activeHolders, activeMembers, reloadDynamic, allOwnerships } from '../store.js';
 import {
-  allGamesWithHolders, ownersOf, allOwnerships, CATEGORY_GROUPS, CATEGORY_LABELS,
+  allGamesWithHolders, ownersOf, CATEGORY_GROUPS, CATEGORY_LABELS,
   filterGames, formatPlayers, formatDuration, formatWeight,
 } from '../rules.js';
 import { writeAction, getSelfId } from '../api.js';
