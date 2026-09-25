@@ -2,7 +2,7 @@
 // 直接編輯 Sheets members 分頁的做法。只認主密碼，跟一般使用者的 Firebase
 // 登入身分無關，所以不放進主導覽列，知道網址（#/admin）的人才會用到。
 import { collection, query, where, getDocs } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
-import { activeMembers, reloadDynamic, getGameMeta } from '../store.js';
+import { activeMembers, activeVenues, reloadDynamic, getGameMeta } from '../store.js';
 import { db } from '../firebase.js';
 import { CATEGORY_LABELS } from '../rules.js';
 import { escapeHtml, showToast } from '../app.js';
@@ -28,8 +28,13 @@ function correctionValueLabel(field, value) {
 
 export async function renderAdmin(appEl) {
   const members = activeMembers();
-  const pendingSnap = await getDocs(query(collection(db, 'game_corrections'), where('status', '==', 'pending')));
-  const pendingCorrections = pendingSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const venues = activeVenues();
+  const [correctionsSnap, venueReqSnap] = await Promise.all([
+    getDocs(query(collection(db, 'game_corrections'), where('status', '==', 'pending'))),
+    getDocs(query(collection(db, 'venue_collection_requests'), where('status', '==', 'pending'))),
+  ]);
+  const pendingCorrections = correctionsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const pendingVenueRequests = venueReqSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
   appEl.innerHTML = `
     <h1 class="page-title">管理</h1>
@@ -58,6 +63,60 @@ export async function renderAdmin(appEl) {
           </div>
         `;
       }).join('')}
+    </div>
+
+    <div class="card">
+      <div class="section-title">待審核的場地收藏提議（${pendingVenueRequests.length}）</div>
+      ${pendingVenueRequests.length === 0 ? '<p class="card-meta">目前沒有待審核的項目。</p>' : pendingVenueRequests.map((r) => {
+        const meta = getGameMeta(r.bgg_id);
+        const venue = venues.find((v) => v.id === r.venue_id);
+        return `
+          <div class="card" style="margin-bottom:8px;">
+            <div class="card-meta">場地：${escapeHtml(venue ? venue.name : r.venue_id)}</div>
+            <div class="card-meta">遊戲：${escapeHtml(meta.name_zh || meta.name_en || String(r.bgg_id))}</div>
+            <div class="card-meta">提議人：${escapeHtml(r.submitted_by_name || r.submitted_by)}</div>
+            <div style="display:flex; gap:8px; margin-top:8px;">
+              <button type="button" class="btn btn-sm btn-primary" data-venuereq-id="${escapeHtml(r.id)}" data-venuereq-action="approve">通過</button>
+              <button type="button" class="btn btn-sm btn-ghost" data-venuereq-id="${escapeHtml(r.id)}" data-venuereq-action="reject">駁回</button>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+
+    <div class="card">
+      <div class="section-title">新增地點</div>
+      <div class="form-group">
+        <label class="form-label" for="new-venue-name">名稱</label>
+        <input class="form-control" id="new-venue-name" placeholder="會同時當作識別 id，之後不能改">
+      </div>
+      <div class="form-group">
+        <label class="form-label">開放名單（誰能開這個場地，不選＝誰都能選）</label>
+        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+          ${members.map((m) => `
+            <label style="display:flex; align-items:center; gap:4px;">
+              <input type="checkbox" class="new-venue-unlock-member" value="${escapeHtml(m.id)}"> ${escapeHtml(m.name)}
+            </label>
+          `).join('')}
+        </div>
+      </div>
+      <p id="add-venue-error" class="error-text" hidden></p>
+      <button type="button" id="add-venue-btn" class="btn btn-primary btn-sm">新增</button>
+    </div>
+
+    <div class="card">
+      <div class="section-title">刪除地點</div>
+      ${venues.length === 0 ? '<p class="card-meta">目前沒有地點。</p>' : `
+        <div class="form-group">
+          <label class="form-label" for="delete-venue-select">地點</label>
+          <select class="form-control" id="delete-venue-select">
+            ${venues.map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.name)}</option>`).join('')}
+          </select>
+        </div>
+        <p class="form-hint">歷史事件裡引用這個地點的紀錄不會被清掉，只是之後會顯示「場地已刪除」。</p>
+        <p id="delete-venue-error" class="error-text" hidden></p>
+        <button type="button" id="delete-venue-btn" class="btn btn-danger btn-sm">刪除</button>
+      `}
     </div>
 
     <div class="card">
@@ -138,6 +197,107 @@ export async function renderAdmin(appEl) {
       renderAdmin(appEl);
     });
   });
+
+  document.querySelectorAll('button[data-venuereq-id]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      let data;
+      try {
+        const res = await fetch('/api/adminReviewVenueCollection', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            master_password: masterInput.value,
+            request_id: btn.dataset.venuereqId,
+            action: btn.dataset.venuereqAction,
+          }),
+        });
+        data = await res.json();
+      } catch {
+        data = { ok: false, error: 'NETWORK_ERROR' };
+      }
+      if (!data.ok) {
+        btn.disabled = false;
+        showToast(ADMIN_ERROR_LABELS[data.error] || `處理失敗：${data.error}`);
+        return;
+      }
+      await reloadDynamic();
+      showToast(btn.dataset.venuereqAction === 'approve' ? '已通過並登記進場地收藏。' : '已駁回。');
+      renderAdmin(appEl);
+    });
+  });
+
+  document.getElementById('add-venue-btn').addEventListener('click', async () => {
+    const errorEl = document.getElementById('add-venue-error');
+    errorEl.hidden = true;
+    const name = document.getElementById('new-venue-name').value.trim();
+    if (!name) {
+      errorEl.textContent = '請輸入名稱。';
+      errorEl.hidden = false;
+      return;
+    }
+    const unlockIds = [...document.querySelectorAll('.new-venue-unlock-member:checked')].map((el) => el.value);
+
+    const btn = document.getElementById('add-venue-btn');
+    btn.disabled = true;
+    btn.textContent = '處理中…';
+    let data;
+    try {
+      const res = await fetch('/api/adminAddVenue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ master_password: masterInput.value, name, unlock_member_ids: unlockIds }),
+      });
+      data = await res.json();
+    } catch {
+      data = { ok: false, error: 'NETWORK_ERROR' };
+    }
+    btn.disabled = false;
+    btn.textContent = '新增';
+    if (!data.ok) {
+      errorEl.textContent = data.error === 'ALREADY_EXISTS' ? '已經有同名地點了。' : (ADMIN_ERROR_LABELS[data.error] || `新增失敗：${data.error}`);
+      errorEl.hidden = false;
+      return;
+    }
+    await reloadDynamic();
+    showToast(`已新增「${name}」。`);
+    renderAdmin(appEl);
+  });
+
+  const deleteVenueBtn = document.getElementById('delete-venue-btn');
+  if (deleteVenueBtn) {
+    deleteVenueBtn.addEventListener('click', async () => {
+      const errorEl = document.getElementById('delete-venue-error');
+      errorEl.hidden = true;
+      const venueId = document.getElementById('delete-venue-select').value;
+      const venue = venues.find((v) => v.id === venueId);
+      if (!confirm(`確定要刪除「${venue ? venue.name : venueId}」嗎？這個動作沒辦法復原。`)) return;
+
+      deleteVenueBtn.disabled = true;
+      deleteVenueBtn.textContent = '處理中…';
+      let data;
+      try {
+        const res = await fetch('/api/adminDeleteVenue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ master_password: masterInput.value, venue_id: venueId }),
+        });
+        data = await res.json();
+      } catch {
+        data = { ok: false, error: 'NETWORK_ERROR' };
+      }
+      deleteVenueBtn.disabled = false;
+      deleteVenueBtn.textContent = '刪除';
+      if (!data.ok) {
+        errorEl.textContent = ADMIN_ERROR_LABELS[data.error] || `刪除失敗：${data.error}`;
+        errorEl.hidden = false;
+        return;
+      }
+      await reloadDynamic();
+      showToast(`已刪除「${venue ? venue.name : venueId}」。`);
+      renderAdmin(appEl);
+    });
+  }
 
   document.getElementById('add-member-btn').addEventListener('click', async () => {
     const errorEl = document.getElementById('add-member-error');

@@ -1,4 +1,4 @@
-import { activeHolders, activeMembers, reloadDynamic, allOwnerships } from '../store.js';
+import { activeHolders, activeMembers, activeVenues, reloadDynamic, allOwnerships } from '../store.js';
 import {
   allGamesWithHolders, ownersOf, CATEGORY_GROUPS, CATEGORY_LABELS,
   filterGames, formatPlayers, formatDuration, formatWeight,
@@ -188,8 +188,10 @@ export async function renderGames(appEl) {
         ` : ''}
         <div style="display:flex; gap:8px; margin-top:16px; flex-wrap:wrap;">
           <button type="button" id="toggle-have-btn" class="btn btn-sm ${iHaveIt ? '' : 'btn-primary'}">${iHaveIt ? '✓ 我也有（點一下移除）' : '＋ 我也有這款'}</button>
+          <button type="button" id="propose-venue-toggle" class="btn btn-sm btn-ghost">幫場地登記這款</button>
           <button type="button" id="report-correction-toggle" class="btn btn-sm btn-ghost">回報資料有誤</button>
         </div>
+        <div id="propose-venue-form" hidden></div>
         <div id="correction-form" hidden></div>
       </div>
     `;
@@ -215,6 +217,7 @@ export async function renderGames(appEl) {
     });
 
     setupCorrectionForm(item, meta);
+    setupProposeVenueForm(item, meta);
 
     document.getElementById('detail-close').addEventListener('click', () => {
       expandedId = null;
@@ -437,6 +440,70 @@ export async function renderGames(appEl) {
         showToast('已送出，等管理員審核。');
         formEl.hidden = true;
         toggleBtn.textContent = '回報資料有誤';
+      });
+    }
+  }
+
+  // ---- 幫場地登記這款遊戲（要 admin 審核才會真的生效） ----
+  function setupProposeVenueForm(item, meta) {
+    const toggleBtn = document.getElementById('propose-venue-toggle');
+    const formEl = document.getElementById('propose-venue-form');
+    const venues = activeVenues();
+
+    toggleBtn.addEventListener('click', () => {
+      const opening = formEl.hidden;
+      formEl.hidden = !opening;
+      toggleBtn.textContent = opening ? '取消' : '幫場地登記這款';
+      if (opening) renderForm();
+    });
+
+    function renderForm() {
+      if (venues.length === 0) {
+        formEl.innerHTML = '<p class="card-meta">目前沒有任何場地。</p>';
+        return;
+      }
+      formEl.innerHTML = `
+        <div class="form-group">
+          <label class="form-label" for="propose-venue-select">場地</label>
+          <select class="form-control" id="propose-venue-select">
+            ${venues.map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.name)}</option>`).join('')}
+          </select>
+        </div>
+        <p class="form-hint">送出後要等管理員審核通過，才會真的加進那個場地的收藏。</p>
+        <p id="propose-venue-error" class="error-text" hidden></p>
+        <button type="button" id="propose-venue-submit" class="btn btn-primary btn-sm">送出給管理員審核</button>
+      `;
+
+      document.getElementById('propose-venue-submit').addEventListener('click', async () => {
+        const errorEl = document.getElementById('propose-venue-error');
+        errorEl.hidden = true;
+        const selfId = getSelfId();
+        if (!selfId) {
+          errorEl.textContent = BGG_ERROR_LABELS.MISSING_MEMBER_ID;
+          errorEl.hidden = false;
+          return;
+        }
+        const venueId = document.getElementById('propose-venue-select').value;
+        const member = activeMembers().find((m) => m.id === selfId);
+
+        const submitBtn = document.getElementById('propose-venue-submit');
+        submitBtn.disabled = true;
+        submitBtn.textContent = '送出中…';
+        const result = await writeAction('submitVenueCollection', {
+          venue_id: venueId, bgg_id: item.bggId, name_zh: meta.name_zh,
+        }, selfId, member ? member.name : selfId);
+        submitBtn.disabled = false;
+        submitBtn.textContent = '送出給管理員審核';
+        if (!result.ok) {
+          if (result.error !== 'CANCELLED') {
+            errorEl.textContent = `送出失敗：${result.error}`;
+            errorEl.hidden = false;
+          }
+          return;
+        }
+        showToast('已送出，等管理員審核。');
+        formEl.hidden = true;
+        toggleBtn.textContent = '幫場地登記這款';
       });
     }
   }

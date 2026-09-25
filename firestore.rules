@@ -52,6 +52,16 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // 幫某個場地新增遊戲的提議：任何人都能送，但套用到 collections 要 admin
+    // 審核（api/adminReviewVenueCollection.js），不是自己名下的東西不能直寫。
+    match /venue_collection_requests/{requestId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.submitted_by == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow update, delete: if false;
+    }
+
     match /{document=**} {
       allow read: if true;
       allow write: if false;

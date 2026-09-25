@@ -93,6 +93,7 @@ export async function writeAction(action, payload, requiredMemberId, memberLabel
   if (action === 'toggleSignup') return doToggleSignup(payload);
   if (action === 'toggleCollection') return doToggleCollection(payload);
   if (action === 'submitCorrection') return doSubmitCorrection(payload, requiredMemberId, memberLabel);
+  if (action === 'submitVenueCollection') return doSubmitVenueCollection(payload, requiredMemberId, memberLabel);
   return callApi(action, payload);
 }
 
@@ -119,6 +120,23 @@ async function doSubmitCorrection(payload, submittedBy, submittedByName) {
     const ref = doc(collection(db, 'game_corrections'));
     await setDoc(ref, {
       bgg_id, field, current_value: current_value ?? '', suggested_value, note: note || '',
+      submitted_by: submittedBy, submitted_by_name: submittedByName || submittedBy,
+      submitted_at: new Date().toISOString(), status: 'pending',
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.code || 'FIRESTORE_ERROR' };
+  }
+}
+
+// 提議「幫某個場地新增這款遊戲」，送給 admin 審核，通過才會真的登記進
+// collections。跟 doSubmitCorrection 一樣：送出後不能自己再改。
+async function doSubmitVenueCollection(payload, submittedBy, submittedByName) {
+  const { venue_id, bgg_id, name_zh } = payload;
+  try {
+    const ref = doc(collection(db, 'venue_collection_requests'));
+    await setDoc(ref, {
+      venue_id, bgg_id, name_zh: name_zh || '',
       submitted_by: submittedBy, submitted_by_name: submittedByName || submittedBy,
       submitted_at: new Date().toISOString(), status: 'pending',
     });
