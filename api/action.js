@@ -182,38 +182,55 @@ async function setOwnPassword(req, res, uid) {
 
 // 使用者自建遊戲：貼 BGG 連結或 BGG id，抓後設資料 upsert 進 games，
 // 選填順便登記進自己的收藏（collections）。任何登入身分都能用。
+function numOrNull(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// BGG 連結還是要貼（用來取得 bgg_id 當識別碼），但 BGG 目前需要申請 API
+// 權杖才能自動抓資料（見 api/_bgg.js），權杖核准前 fetchBggData 大概率會
+// 失敗。這裡刻意把它當成「best effort」：抓不到就 bggData 為 null，改用
+// 使用者手動填的欄位；權杖核准後可以再讓使用者「回報資料有誤」補齊。
 async function addGame(req, res, uid) {
-  const { bgg_input, name_zh, add_to_collection } = req.body || {};
+  const {
+    bgg_input, name_zh, name_en, min_players, max_players, playing_time, thumbnail,
+    add_to_collection,
+  } = req.body || {};
   const bggId = extractBggId(bgg_input);
   if (!bggId) return res.status(400).json({ ok: false, error: 'INVALID_BGG_ID' });
 
-  let bggData;
+  let bggData = null;
   try {
     bggData = await fetchBggData(bggId);
-  } catch (err) {
-    return res.status(502).json({ ok: false, error: err.message === 'BGG_BUSY' ? 'BGG_BUSY' : 'BGG_FETCH_FAILED' });
+  } catch {
+    bggData = null;
   }
-  if (!bggData) return res.status(404).json({ ok: false, error: 'BGG_NOT_FOUND' });
 
   const gameRef = db.collection('games').doc(String(bggId));
   const existingSnap = await gameRef.get();
   const existing = existingSnap.exists ? existingSnap.data() : {};
 
+  const finalNameZh = name_zh || existing.name_zh || (bggData && bggData.name_en) || null;
+  if (!finalNameZh) {
+    return res.status(400).json({ ok: false, error: 'MISSING_NAME' });
+  }
+
   const gameRow = {
     bgg_id: bggId,
-    name_zh: name_zh || existing.name_zh || null,
-    name_en: bggData.name_en ?? existing.name_en ?? null,
-    thumbnail: bggData.thumbnail ?? existing.thumbnail ?? null,
-    min_players: bggData.min_players ?? existing.min_players ?? null,
-    max_players: bggData.max_players ?? existing.max_players ?? null,
-    playing_time: bggData.playing_time ?? existing.playing_time ?? null,
-    min_playtime: bggData.min_playtime ?? existing.min_playtime ?? null,
-    max_playtime: bggData.max_playtime ?? existing.max_playtime ?? null,
-    weight: bggData.weight ?? existing.weight ?? null,
-    year: bggData.year ?? existing.year ?? null,
+    name_zh: finalNameZh,
+    name_en: name_en || (bggData && bggData.name_en) || existing.name_en || null,
+    thumbnail: thumbnail || (bggData && bggData.thumbnail) || existing.thumbnail || null,
+    min_players: numOrNull(min_players) ?? (bggData && bggData.min_players) ?? existing.min_players ?? null,
+    max_players: numOrNull(max_players) ?? (bggData && bggData.max_players) ?? existing.max_players ?? null,
+    playing_time: numOrNull(playing_time) ?? (bggData && bggData.playing_time) ?? existing.playing_time ?? null,
+    min_playtime: (bggData && bggData.min_playtime) ?? existing.min_playtime ?? null,
+    max_playtime: (bggData && bggData.max_playtime) ?? existing.max_playtime ?? null,
+    weight: (bggData && bggData.weight) ?? existing.weight ?? null,
+    year: (bggData && bggData.year) ?? existing.year ?? null,
     tags: Array.isArray(existing.tags) ? existing.tags : [],
-    is_expansion: bggData.is_expansion ?? existing.is_expansion ?? false,
-    parent_bgg_id: bggData.parent_bgg_id ?? existing.parent_bgg_id ?? null,
+    is_expansion: (bggData && bggData.is_expansion) ?? existing.is_expansion ?? false,
+    parent_bgg_id: (bggData && bggData.parent_bgg_id) ?? existing.parent_bgg_id ?? null,
   };
   await gameRef.set(gameRow);
 
@@ -223,5 +240,5 @@ async function addGame(req, res, uid) {
     });
   }
 
-  return res.status(200).json({ ok: true, game: gameRow });
+  return res.status(200).json({ ok: true, game: gameRow, bgg_fetch_ok: !!bggData });
 }

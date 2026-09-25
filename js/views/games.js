@@ -256,8 +256,31 @@ export async function renderGames(appEl) {
           <input class="form-control" id="new-game-input" placeholder="例如 https://boardgamegeek.com/boardgame/174430/ 或直接輸入 174430">
         </div>
         <div class="form-group">
-          <label class="form-label" for="new-game-name-zh">中文名稱（選填）</label>
+          <label class="form-label" for="new-game-name-zh">中文名稱（BGG 抓不到資料時必填）</label>
           <input class="form-control" id="new-game-name-zh" placeholder="沒填就先只顯示英文名稱">
+        </div>
+        <p class="form-hint">BGG 目前需要申請 API 權杖才能自動抓資料，申請核准前可能抓不到，以下欄位可以先手動填，之後再回來訂正也可以。</p>
+        <div class="form-group">
+          <label class="form-label" for="new-game-name-en">英文名稱（選填）</label>
+          <input class="form-control" id="new-game-name-en">
+        </div>
+        <div class="form-group" style="display:flex; gap:8px;">
+          <div style="flex:1;">
+            <label class="form-label" for="new-game-min-players">最少人數（選填）</label>
+            <input type="number" min="1" class="form-control" id="new-game-min-players">
+          </div>
+          <div style="flex:1;">
+            <label class="form-label" for="new-game-max-players">最多人數（選填）</label>
+            <input type="number" min="1" class="form-control" id="new-game-max-players">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="new-game-playing-time">遊戲時間（分鐘，選填）</label>
+          <input type="number" min="1" class="form-control" id="new-game-playing-time">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="new-game-thumbnail">縮圖網址（選填）</label>
+          <input class="form-control" id="new-game-thumbnail">
         </div>
         <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
           <input type="checkbox" id="new-game-add-collection" checked>
@@ -272,7 +295,7 @@ export async function renderGames(appEl) {
         errorEl.hidden = true;
         const bggInput = document.getElementById('new-game-input').value.trim();
         if (!bggInput) {
-          errorEl.textContent = '請輸入 BGG 連結或 id。';
+          errorEl.textContent = '請輸入 BGG 連結或 id（就算 BGG 暫時抓不到資料，還是要靠這個知道是哪一款）。';
           errorEl.hidden = false;
           return;
         }
@@ -285,6 +308,11 @@ export async function renderGames(appEl) {
         const payload = {
           bgg_input: bggInput,
           name_zh: document.getElementById('new-game-name-zh').value.trim() || undefined,
+          name_en: document.getElementById('new-game-name-en').value.trim() || undefined,
+          min_players: document.getElementById('new-game-min-players').value || undefined,
+          max_players: document.getElementById('new-game-max-players').value || undefined,
+          playing_time: document.getElementById('new-game-playing-time').value || undefined,
+          thumbnail: document.getElementById('new-game-thumbnail').value.trim() || undefined,
           add_to_collection: document.getElementById('new-game-add-collection').checked,
         };
 
@@ -297,14 +325,18 @@ export async function renderGames(appEl) {
           submitBtn.disabled = false;
           submitBtn.textContent = '送出';
           if (result.error !== 'CANCELLED') {
-            errorEl.textContent = BGG_ERROR_LABELS[result.error] || `新增失敗：${result.error}`;
+            errorEl.textContent = result.error === 'MISSING_NAME'
+              ? 'BGG 暫時抓不到資料，請至少手動填中文名稱。'
+              : (BGG_ERROR_LABELS[result.error] || `新增失敗：${result.error}`);
             errorEl.hidden = false;
           }
           return;
         }
 
         await reloadDynamic();
-        showToast(`已新增「${result.game.name_zh || result.game.name_en}」。`);
+        showToast(result.bgg_fetch_ok
+          ? `已新增「${result.game.name_zh || result.game.name_en}」。`
+          : `已用手動填寫的資料新增「${result.game.name_zh}」（BGG 資料暫時抓不到，之後可以再訂正）。`);
         formEl.hidden = true;
         toggleBtn.textContent = '＋ 新增遊戲';
         rerender();

@@ -151,6 +151,12 @@ export async function renderEvent(appEl, eventId) {
       return;
     }
 
+    // 只列出「有反應的人」（投過票的）＋自己（就算還沒投，也要有一行能投），
+    // 不是列出全部成員、沒投的人也佔一行顯示「－」。人一多畫面才不會越來
+    // 越長；真的想知道還有誰完全沒回應，看「可以人數」跟報名名單即可。
+    const votedMemberIds = new Set(votes.map((v) => v.member_id));
+    const respondentMembers = members.filter((m) => votedMemberIds.has(m.id) || m.id === selfId);
+
     function cellContent(member, slot) {
       const vote = votes.find((v) => v.slot_id === slot.slot_id && v.member_id === member.id);
       const ok = vote ? isTrue(vote.ok) : false;
@@ -172,7 +178,9 @@ export async function renderEvent(appEl, eventId) {
             </tr>
           </thead>
           <tbody>
-            ${members.map((m) => `
+            ${respondentMembers.length === 0 ? `
+              <tr><td colspan="${slots.length + 1}" class="card-meta">還沒有人投票。</td></tr>
+            ` : respondentMembers.map((m) => `
               <tr>
                 <td>${escapeHtml(m.name)}${m.id === selfId ? '（你）' : ''}</td>
                 ${slots.map((s) => `<td>${cellContent(m, s)}</td>`).join('')}
