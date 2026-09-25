@@ -310,6 +310,24 @@ textarea.form-control { resize: vertical; min-height: 70px; }
   margin-bottom: var(--gap);
 }
 
+/* 頁首固定列的登入狀態，取代原本每個頁面各自的「請先點選你的名字」大清單。 */
+.header-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.identity-modal-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
 .vote-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--color-border);

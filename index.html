@@ -13,12 +13,23 @@
     <nav class="site-nav">
       <a href="#/games">遊戲庫</a>
       <a href="#/new" class="btn btn-primary btn-sm">開新團</a>
+      <div id="header-identity" class="header-identity"></div>
     </nav>
   </header>
 
   <main id="app" class="app">
     <div class="loading">載入中…</div>
   </main>
+
+  <div id="identity-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <h2>你是哪一位？</h2>
+      <div id="identity-modal-list" class="identity-modal-list"></div>
+      <div class="modal-actions">
+        <button id="identity-modal-cancel" class="btn btn-ghost">先不登入</button>
+      </div>
+    </div>
+  </div>
 
   <div id="secret-modal" class="modal-overlay" hidden>
     <div class="modal">

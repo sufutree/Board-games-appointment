@@ -7,7 +7,7 @@ import {
   filterGames, formatPlayers, formatDuration, formatWeight,
 } from '../rules.js';
 import { writeAction, getSelfId } from '../api.js';
-import { renderIdentityBar } from '../identityBar.js';
+import { openIdentityModal } from '../identityBar.js';
 import { escapeHtml, showToast } from '../app.js';
 
 const BGG_ERROR_LABELS = {
@@ -15,9 +15,18 @@ const BGG_ERROR_LABELS = {
   BGG_NOT_FOUND: 'BGG 上查無這個 id。',
   BGG_BUSY: 'BGG 目前排隊中，請稍等幾秒再試一次。',
   BGG_FETCH_FAILED: '跟 BGG 要資料失敗，請稍後再試。',
-  UNAUTHENTICATED: '請先在上面選擇你的身分。',
-  MISSING_MEMBER_ID: '請先在上面選擇你的身分。',
+  UNAUTHENTICATED: '請先登入。',
+  MISSING_MEMBER_ID: '請先登入。',
 };
+
+// 需要登入身分才能做的動作統一走這個：已登入就直接回傳 selfId，沒登入就
+// 跳出登入視窗，成功回傳新的 selfId，取消回傳 null。
+async function requireSelfId() {
+  const selfId = getSelfId();
+  if (selfId) return selfId;
+  const loggedIn = await openIdentityModal();
+  return loggedIn ? getSelfId() : null;
+}
 
 const CORRECTION_FIELDS = {
   name_zh: '中文名稱',
@@ -42,7 +51,6 @@ export async function renderGames(appEl) {
 
   appEl.innerHTML = `
     <h1 class="page-title">遊戲庫</h1>
-    <div id="identity-bar"></div>
 
     <div class="card">
       <button type="button" id="add-game-toggle" class="btn btn-sm">＋ 新增遊戲</button>
@@ -87,7 +95,6 @@ export async function renderGames(appEl) {
   `;
 
   const rerender = () => renderGames(appEl);
-  renderIdentityBar(document.getElementById('identity-bar'), activeMembers(), rerender);
   setupAddGameForm();
 
   const keywordInput = document.getElementById('g-keyword');
@@ -201,16 +208,15 @@ export async function renderGames(appEl) {
     `;
 
     document.getElementById('toggle-have-btn').addEventListener('click', async () => {
-      if (!selfId) {
-        showToast(BGG_ERROR_LABELS.MISSING_MEMBER_ID);
-        return;
-      }
-      const member = activeMembers().find((m) => m.id === selfId);
+      const currentSelfId = await requireSelfId();
+      if (!currentSelfId) return;
+      const reallyHaveIt = allOwnerships().some((o) => o.holder_id === currentSelfId && o.bgg_id === item.bggId);
+      const member = activeMembers().find((m) => m.id === currentSelfId);
       const btn = document.getElementById('toggle-have-btn');
       btn.disabled = true;
       const result = await writeAction('toggleCollection', {
-        holder_id: selfId, bgg_id: item.bggId, name_zh: meta.name_zh, has: !iHaveIt,
-      }, selfId, member ? member.name : selfId);
+        holder_id: currentSelfId, bgg_id: item.bggId, name_zh: meta.name_zh, has: !reallyHaveIt,
+      }, currentSelfId, member ? member.name : currentSelfId);
       btn.disabled = false;
       if (!result.ok) {
         if (result.error !== 'CANCELLED') showToast(`操作失敗：${result.error}`);
@@ -299,12 +305,8 @@ export async function renderGames(appEl) {
           errorEl.hidden = false;
           return;
         }
-        const selfId = getSelfId();
-        if (!selfId) {
-          errorEl.textContent = '請先在上面選擇你的身分。';
-          errorEl.hidden = false;
-          return;
-        }
+        const selfId = await requireSelfId();
+        if (!selfId) return;
         const payload = {
           bgg_input: bggInput,
           name_zh: document.getElementById('new-game-name-zh').value.trim() || undefined,
@@ -446,12 +448,8 @@ export async function renderGames(appEl) {
         const field = fieldSelect.value;
         const note = document.getElementById('correction-note').value.trim();
 
-        const selfId = getSelfId();
-        if (!selfId) {
-          errorEl.textContent = BGG_ERROR_LABELS.MISSING_MEMBER_ID;
-          errorEl.hidden = false;
-          return;
-        }
+        const selfId = await requireSelfId();
+        if (!selfId) return;
         const member = activeMembers().find((m) => m.id === selfId);
         const submitBtn = document.getElementById('correction-submit');
 
@@ -564,12 +562,8 @@ export async function renderGames(appEl) {
       document.getElementById('propose-venue-submit').addEventListener('click', async () => {
         const errorEl = document.getElementById('propose-venue-error');
         errorEl.hidden = true;
-        const selfId = getSelfId();
-        if (!selfId) {
-          errorEl.textContent = BGG_ERROR_LABELS.MISSING_MEMBER_ID;
-          errorEl.hidden = false;
-          return;
-        }
+        const selfId = await requireSelfId();
+        if (!selfId) return;
         const venueId = document.getElementById('propose-venue-select').value;
         const member = activeMembers().find((m) => m.id === selfId);
 

@@ -1,5 +1,7 @@
-import { store, loadAll } from './store.js';
+import { store, loadAll, activeMembers } from './store.js';
 import { waitForAuthReady } from './firebase.js';
+import { getSelfId } from './api.js';
+import { initHeaderIdentity, openIdentityModal } from './identityBar.js';
 import { renderHome } from './views/home.js';
 import { renderNewEvent } from './views/newEvent.js';
 import { renderEvent } from './views/event.js';
@@ -76,7 +78,11 @@ async function boot() {
   try {
     await waitForAuthReady();
     await loadAll();
+    initHeaderIdentity(activeMembers(), router);
     await router();
+    // 開啟網站主動問一次「你是誰」，可以直接取消當作先不登入逛逛；
+    // 不 await，讓畫面先顯示出來，視窗疊在上面，不擋住瀏覽。
+    if (!getSelfId()) openIdentityModal();
   } catch (err) {
     console.error(err);
     renderLoadError();

@@ -7,7 +7,7 @@ import {
   formatPlayers, formatDuration, formatWeight, venueQualifies,
 } from '../rules.js';
 import { writeAction, getSelfId } from '../api.js';
-import { renderIdentityBar as renderSharedIdentityBar } from '../identityBar.js';
+import { openIdentityModal } from '../identityBar.js';
 import { escapeHtml, showToast } from '../app.js';
 
 const STATUS_LABEL = { open: '投票中', confirmed: '已定案', cancelled: '已取消' };
@@ -102,8 +102,6 @@ export async function renderEvent(appEl, eventId) {
       ${event.note ? `<div class="card-meta">備註：${escapeHtml(event.note)}</div>` : ''}
     </div>
 
-    <div id="identity-bar"></div>
-
     <div class="section-title">時段投票</div>
     <div id="vote-section"></div>
 
@@ -126,7 +124,6 @@ export async function renderEvent(appEl, eventId) {
     ${event.status !== 'cancelled' ? '<div id="cancel-section" style="margin-top:24px;"></div>' : ''}
   `;
 
-  renderIdentityBar();
   renderVoteSection();
   if (event.status === 'open') renderConfirmSection();
   if (event.status === 'confirmed') {
@@ -135,11 +132,6 @@ export async function renderEvent(appEl, eventId) {
   }
   renderPlayableSection();
   if (event.status !== 'cancelled') renderCancelControl();
-
-  // ---- 身分列 ----
-  function renderIdentityBar() {
-    renderSharedIdentityBar(document.getElementById('identity-bar'), members, rerender);
-  }
 
   // ---- 投票表 ----
   function renderVoteSection() {
@@ -193,8 +185,17 @@ export async function renderEvent(appEl, eventId) {
           </tbody>
         </table>
       </div>
-      ${!selfIsValid && votingOpen ? '<p class="card-meta">請先在上方點選你的名字才能投票。</p>' : ''}
+      ${!selfIsValid && votingOpen ? '<p class="card-meta"><a href="#" id="vote-login-link">請先登入才能投票</a></p>' : ''}
     `;
+
+    const voteLoginLink = document.getElementById('vote-login-link');
+    if (voteLoginLink) {
+      voteLoginLink.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const loggedIn = await openIdentityModal();
+        if (loggedIn) rerender();
+      });
+    }
 
     if (votingOpen && selfIsValid) {
       el.querySelectorAll('.vote-cell-btn').forEach((btn) => {
