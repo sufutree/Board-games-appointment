@@ -7,7 +7,7 @@ import {
   formatPlayers, formatDuration, formatWeight, venueQualifies,
 } from '../rules.js';
 import { writeAction, getSelfId } from '../api.js';
-import { openIdentityModal } from '../identityBar.js';
+import { openIdentityModal, requireSelfId } from '../identityBar.js';
 import { escapeHtml, showToast } from '../app.js';
 
 const STATUS_LABEL = { open: '投票中', confirmed: '已定案', cancelled: '已取消' };
@@ -110,10 +110,12 @@ export async function renderEvent(appEl, eventId) {
       <div id="confirm-section" class="card"></div>
     ` : ''}
 
-    ${event.status === 'confirmed' ? `
+    ${event.status !== 'cancelled' ? `
       <div class="section-title">地點與指定遊戲</div>
       <div id="edit-details-section" class="card"></div>
+    ` : ''}
 
+    ${event.status === 'confirmed' ? `
       <div class="section-title">報名名單</div>
       <div id="signup-section"></div>
     ` : ''}
@@ -126,10 +128,8 @@ export async function renderEvent(appEl, eventId) {
 
   renderVoteSection();
   if (event.status === 'open') renderConfirmSection();
-  if (event.status === 'confirmed') {
-    renderEditDetailsSection();
-    renderSignupSection();
-  }
+  if (event.status !== 'cancelled') renderEditDetailsSection();
+  if (event.status === 'confirmed') renderSignupSection();
   renderPlayableSection();
   if (event.status !== 'cancelled') renderCancelControl();
 
@@ -220,12 +220,10 @@ export async function renderEvent(appEl, eventId) {
 
     const payload = {
       event_id: event.event_id,
-      member_id: selfId,
       votes: [{ slot_id: slotId, ok: nextOk }],
     };
 
-    const selfMember = memberById(selfId);
-    const result = await writeAction('vote', payload, selfId, selfMember ? selfMember.name : selfId);
+    const result = await writeAction('vote', payload);
     if (!result.ok) {
       allVoteBtns.forEach((b) => { b.disabled = false; });
       if (result.error !== 'CANCELLED') showToast(`投票失敗：${result.error}`);
@@ -329,14 +327,19 @@ export async function renderEvent(appEl, eventId) {
         }
       }
 
+      if (!(await requireSelfId())) return;
+
       const btn = document.getElementById('confirm-btn');
       btn.disabled = true;
       btn.textContent = '處理中…';
-      const result = await writeAction('confirm', payload, event.creator_id, creator ? creator.name : event.creator_id);
+      const result = await writeAction('confirm', payload);
       if (!result.ok) {
         btn.disabled = false;
         btn.textContent = '定案';
-        if (result.error !== 'CANCELLED') {
+        if (result.error === 'FORBIDDEN') {
+          errorEl.textContent = '只有發起人能定案。';
+          errorEl.hidden = false;
+        } else if (result.error !== 'CANCELLED') {
           errorEl.textContent = `定案失敗：${result.error}`;
           errorEl.hidden = false;
         }
@@ -349,54 +352,39 @@ export async function renderEvent(appEl, eventId) {
   }
 
   // ---- 報名名單 ----
+  // 報名／退出只能操作自己（Firestore 規則本來就只允許 member_id ==
+  // 自己的 uid），不再是「選任何人加入/移除」的下拉選單。
   function renderSignupSection() {
     const el = document.getElementById('signup-section');
     const signedIds = new Set(signups.map((s) => s.member_id));
-    const notSigned = members.filter((m) => !signedIds.has(m.id));
+    const selfSigned = signedIds.has(selfId);
 
     el.innerHTML = `
       <ul class="signup-list">
         ${signups.length === 0 ? '<li class="card-meta">目前還沒有人報名。</li>' : signups.map((s) => {
           const m = memberById(s.member_id);
+          const isSelf = s.member_id === selfId;
           return `
             <li>
-              <span>${escapeHtml(m ? m.name : s.member_id)}</span>
-              <button type="button" class="btn btn-sm btn-ghost" data-leave="${escapeHtml(s.member_id)}">退出</button>
+              <span>${escapeHtml(m ? m.name : s.member_id)}${isSelf ? '（你）' : ''}</span>
+              ${isSelf ? '<button type="button" class="btn btn-sm btn-ghost" id="leave-btn">退出</button>' : ''}
             </li>
           `;
         }).join('')}
       </ul>
-      ${notSigned.length > 0 ? `
-        <div class="form-group" style="display:flex; gap:8px; align-items:center;">
-          <select class="form-control" id="join-select">
-            ${notSigned.map((m) => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`).join('')}
-          </select>
-          <button type="button" id="join-btn" class="btn btn-primary btn-sm">加入</button>
-        </div>
-      ` : ''}
+      ${!selfSigned ? '<button type="button" id="join-btn" class="btn btn-primary btn-sm">加入</button>' : ''}
     `;
 
-    el.querySelectorAll('button[data-leave]').forEach((btn) => {
-      btn.addEventListener('click', () => onToggleSignup(btn.dataset.leave, false, btn));
-    });
+    const leaveBtn = document.getElementById('leave-btn');
+    if (leaveBtn) leaveBtn.addEventListener('click', () => onToggleSignup(false, leaveBtn));
     const joinBtn = document.getElementById('join-btn');
-    if (joinBtn) {
-      joinBtn.addEventListener('click', () => {
-        const memberId = document.getElementById('join-select').value;
-        onToggleSignup(memberId, true, joinBtn);
-      });
-    }
+    if (joinBtn) joinBtn.addEventListener('click', () => onToggleSignup(true, joinBtn));
   }
 
-  async function onToggleSignup(memberId, join, btn) {
+  async function onToggleSignup(join, btn) {
+    if (!(await requireSelfId())) return;
     btn.disabled = true;
-    const targetMember = memberById(memberId);
-    const result = await writeAction(
-      'toggleSignup',
-      { event_id: event.event_id, member_id: memberId, join },
-      memberId,
-      targetMember ? targetMember.name : memberId,
-    );
+    const result = await writeAction('toggleSignup', { event_id: event.event_id, join });
     if (!result.ok) {
       btn.disabled = false;
       if (result.error !== 'CANCELLED') showToast(`操作失敗：${result.error}`);
@@ -499,7 +487,11 @@ export async function renderEvent(appEl, eventId) {
           venueWarningEl.hidden = true;
           return;
         }
-        const participantIds = signups.map((s) => s.member_id);
+        // 定案後看報名名單；投票中還沒有報名名單，改看目前對任一候選時段
+        // 投「可以」的人（不分哪個時段，這裡只是概略提醒，不是精算）。
+        const participantIds = event.status === 'confirmed'
+          ? signups.map((s) => s.member_id)
+          : [...new Set(votes.filter((v) => isTrue(v.ok)).map((v) => v.member_id))];
         if (venueQualifies(venue, participantIds)) {
           venueWarningEl.hidden = true;
           return;
@@ -612,14 +604,19 @@ export async function renderEvent(appEl, eventId) {
           payload.venue_id = venueSel.value;
         }
 
+        if (!(await requireSelfId())) return;
+
         const saveBtn = document.getElementById('edit-details-save');
         saveBtn.disabled = true;
         saveBtn.textContent = '儲存中…';
-        const result = await writeAction('updateEventDetails', payload, event.creator_id, creator ? creator.name : event.creator_id);
+        const result = await writeAction('updateEventDetails', payload);
         if (!result.ok) {
           saveBtn.disabled = false;
           saveBtn.textContent = '儲存';
-          if (result.error !== 'CANCELLED') {
+          if (result.error === 'FORBIDDEN') {
+            errorEl.textContent = '只有發起人能編輯。';
+            errorEl.hidden = false;
+          } else if (result.error !== 'CANCELLED') {
             errorEl.textContent = `儲存失敗：${result.error}`;
             errorEl.hidden = false;
           }
@@ -635,69 +632,103 @@ export async function renderEvent(appEl, eventId) {
   }
 
   // ---- 可玩清單 ----
+  // 成團後：參與者＝報名名單，只有一個時段，不用選日期。
+  // 投票中：候選時段可能不只一個，不同日期能來的人不一樣，讓使用者切換
+  // 「預覽哪個候選時段」，參與者＝目前選定時段裡投「可以」的人。
   function renderPlayableSection() {
     const el = document.getElementById('playable-section');
-    const rawList = computePlayableList(event);
-    const pinnedIds = new Set(pinnedGameIds(event));
-    const rawListIds = new Set(rawList.map((item) => item.bggId));
-    const unfulfillablePinned = [...pinnedIds].filter((id) => !rawListIds.has(id));
+    let selectedSlotId = event.status === 'open' && slots.length > 0 ? slots[0].slot_id : null;
 
-    el.innerHTML = `
-      ${unfulfillablePinned.length > 0 ? `
-        <p class="error-text">⚠️ 主持人指定的遊戲中，目前場地／參與者沒有人能帶來：${unfulfillablePinned.map((id) => escapeHtml(getGameMeta(id).name_zh || getGameMeta(id).name_en || String(id))).join('、')}</p>
-      ` : ''}
-      <div class="filter-bar">
-        <input type="number" min="1" class="form-control" id="filter-players" placeholder="人數" value="${signups.length || ''}">
-        <select class="form-control" id="filter-duration">
-          <option value="">時長不限</option>
-          <option value="30">≤30 分</option>
-          <option value="60">≤60 分</option>
-          <option value="90">≤90 分</option>
-          <option value="120">≤120 分</option>
-        </select>
-        <input type="text" class="form-control" id="filter-keyword" placeholder="關鍵字">
-      </div>
-      <div id="playable-list"></div>
-    `;
-
-    const playersInput = document.getElementById('filter-players');
-    const durationSelect = document.getElementById('filter-duration');
-    const keywordInput = document.getElementById('filter-keyword');
-
-    function renderList() {
-      const listEl = document.getElementById('playable-list');
-      if (rawList.length === 0) {
-        const reason = (!event.venue_id && signups.length === 0)
-          ? '還沒有人報名，也還沒選地點。'
-          : '目前沒有可玩的遊戲資料。';
-        listEl.innerHTML = `<p class="card-meta">${reason}</p>`;
-        return;
+    function participantIds() {
+      if (event.status === 'confirmed') return signups.map((s) => s.member_id);
+      if (event.status === 'open' && selectedSlotId) {
+        return votes.filter((v) => v.slot_id === selectedSlotId && isTrue(v.ok)).map((v) => v.member_id);
       }
-
-      const filtered = filterGames(rawList, {
-        playerCount: playersInput.value,
-        maxDuration: durationSelect.value,
-        keyword: keywordInput.value,
-      });
-
-      if (filtered.length === 0) {
-        listEl.innerHTML = '<p class="card-meta">沒有符合篩選條件的遊戲。</p>';
-        return;
-      }
-
-      const sorted = [...filtered].sort((a, b) => {
-        const aPin = pinnedIds.has(a.bggId) ? 0 : 1;
-        const bPin = pinnedIds.has(b.bggId) ? 0 : 1;
-        return aPin - bPin;
-      });
-
-      listEl.innerHTML = `<div class="game-grid">${sorted.map((item) => renderGameCard(item, pinnedIds.has(item.bggId))).join('')}</div>`;
+      return [];
     }
 
-    playersInput.addEventListener('input', renderList);
-    durationSelect.addEventListener('change', renderList);
-    keywordInput.addEventListener('input', renderList);
-    renderList();
+    function renderAll() {
+      const participants = participantIds();
+      const rawList = computePlayableList(event, participants);
+      const pinnedIds = new Set(pinnedGameIds(event));
+      const rawListIds = new Set(rawList.map((item) => item.bggId));
+      const unfulfillablePinned = [...pinnedIds].filter((id) => !rawListIds.has(id));
+
+      el.innerHTML = `
+        ${event.status === 'open' && slots.length > 1 ? `
+          <div class="form-group">
+            <label class="form-label" for="playable-slot-select">預覽哪個候選時段</label>
+            <select class="form-control" id="playable-slot-select">
+              ${slots.map((s) => `<option value="${s.slot_id}" ${s.slot_id === selectedSlotId ? 'selected' : ''}>${escapeHtml(slotLabel(s))}（${votes.filter((v) => v.slot_id === s.slot_id && isTrue(v.ok)).length} 人可以）</option>`).join('')}
+            </select>
+          </div>
+        ` : ''}
+        ${unfulfillablePinned.length > 0 ? `
+          <p class="error-text">⚠️ 主持人指定的遊戲中，目前場地／參與者沒有人能帶來：${unfulfillablePinned.map((id) => escapeHtml(getGameMeta(id).name_zh || getGameMeta(id).name_en || String(id))).join('、')}</p>
+        ` : ''}
+        <div class="filter-bar">
+          <input type="number" min="1" class="form-control" id="filter-players" placeholder="人數" value="${participants.length || ''}">
+          <select class="form-control" id="filter-duration">
+            <option value="">時長不限</option>
+            <option value="30">≤30 分</option>
+            <option value="60">≤60 分</option>
+            <option value="90">≤90 分</option>
+            <option value="120">≤120 分</option>
+          </select>
+          <input type="text" class="form-control" id="filter-keyword" placeholder="關鍵字">
+        </div>
+        <div id="playable-list"></div>
+      `;
+
+      const slotSelect = document.getElementById('playable-slot-select');
+      if (slotSelect) {
+        slotSelect.addEventListener('change', () => {
+          selectedSlotId = slotSelect.value;
+          renderAll();
+        });
+      }
+
+      const playersInput = document.getElementById('filter-players');
+      const durationSelect = document.getElementById('filter-duration');
+      const keywordInput = document.getElementById('filter-keyword');
+
+      function renderList() {
+        const listEl = document.getElementById('playable-list');
+        if (rawList.length === 0) {
+          const reason = (!event.venue_id && participants.length === 0)
+            ? '還沒有人可以，也還沒選地點。'
+            : '目前沒有可玩的遊戲資料。';
+          listEl.innerHTML = `<p class="card-meta">${reason}</p>`;
+          return;
+        }
+
+        const filtered = filterGames(rawList, {
+          playerCount: playersInput.value,
+          maxDuration: durationSelect.value,
+          keyword: keywordInput.value,
+        });
+
+        if (filtered.length === 0) {
+          listEl.innerHTML = '<p class="card-meta">沒有符合篩選條件的遊戲。</p>';
+          return;
+        }
+
+        const sorted = [...filtered].sort((a, b) => {
+          const aPin = pinnedIds.has(a.bggId) ? 0 : 1;
+          const bPin = pinnedIds.has(b.bggId) ? 0 : 1;
+          return aPin - bPin;
+        });
+
+        listEl.innerHTML = `<div class="game-grid">${sorted.map((item) => renderGameCard(item, pinnedIds.has(item.bggId))).join('')}</div>`;
+      }
+
+      playersInput.addEventListener('input', renderList);
+      durationSelect.addEventListener('change', renderList);
+      keywordInput.addEventListener('input', renderList);
+      renderList();
+    }
+
+    renderAll();
   }
 
   // ---- 取消團 ----
@@ -706,17 +737,14 @@ export async function renderEvent(appEl, eventId) {
     el.innerHTML = `<button type="button" id="cancel-event-btn" class="btn btn-danger btn-sm">取消這個團</button>`;
     document.getElementById('cancel-event-btn').addEventListener('click', async () => {
       if (!confirm('確定要取消這個團嗎？')) return;
+      if (!(await requireSelfId())) return;
       const btn = document.getElementById('cancel-event-btn');
       btn.disabled = true;
-      const result = await writeAction(
-        'cancelEvent',
-        { event_id: event.event_id },
-        event.creator_id,
-        creator ? creator.name : event.creator_id,
-      );
+      const result = await writeAction('cancelEvent', { event_id: event.event_id });
       if (!result.ok) {
         btn.disabled = false;
-        if (result.error !== 'CANCELLED') showToast(`取消失敗：${result.error}`);
+        if (result.error === 'FORBIDDEN') showToast('只有發起人能取消。');
+        else if (result.error !== 'CANCELLED') showToast(`取消失敗：${result.error}`);
         return;
       }
       await reloadDynamic();

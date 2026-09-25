@@ -12,6 +12,8 @@ const ADMIN_ERROR_LABELS = {
   MEMBER_NOT_FOUND: '找不到這個成員。',
   MISSING_NAME: '請輸入姓名。',
   MISSING_MEMBER_ID: '請選擇成員。',
+  MISSING_USERNAME: '請輸入帳號。',
+  USERNAME_TAKEN: '這個帳號已經有人用了。',
 };
 
 const CORRECTION_FIELD_LABELS = {
@@ -196,11 +198,29 @@ export async function renderAdmin(appEl) {
         <input class="form-control" id="new-member-name" placeholder="會同時當作識別 id，之後不能改">
       </div>
       <div class="form-group">
+        <label class="form-label" for="new-member-username">帳號（登入用，英文/拼音）</label>
+        <input class="form-control" id="new-member-username" autocomplete="off">
+      </div>
+      <div class="form-group">
         <label class="form-label" for="new-member-password">初始密碼（選填）</label>
         <input class="form-control" id="new-member-password" placeholder="留空＝這個人第一次登入不用密碼">
       </div>
       <p id="add-member-error" class="error-text" hidden></p>
       <button type="button" id="add-member-btn" class="btn btn-primary btn-sm">新增</button>
+    </div>
+
+    <div class="card">
+      <div class="section-title">帳號設定</div>
+      ${members.length === 0 ? '<p class="card-meta">目前沒有成員。</p>' : members.map((m) => `
+        <div class="form-group" style="display:flex; gap:8px; align-items:flex-end;">
+          <div style="flex:1;">
+            <label class="form-label">${escapeHtml(m.name)}${m.username ? '' : '（尚未設定帳號）'}</label>
+            <input class="form-control" data-username-for="${escapeHtml(m.id)}" value="${escapeHtml(m.username || '')}" autocomplete="off">
+          </div>
+          <button type="button" class="btn btn-sm" data-set-username-for="${escapeHtml(m.id)}">儲存</button>
+        </div>
+      `).join('')}
+      <p id="set-username-error" class="error-text" hidden></p>
     </div>
 
     <div class="card">
@@ -472,12 +492,55 @@ export async function renderAdmin(appEl) {
     });
   }
 
+  document.querySelectorAll('button[data-set-username-for]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const errorEl = document.getElementById('set-username-error');
+      errorEl.hidden = true;
+      const memberId = btn.dataset.setUsernameFor;
+      const input = document.querySelector(`input[data-username-for="${CSS.escape(memberId)}"]`);
+      const username = input.value.trim();
+      if (!username) {
+        errorEl.textContent = ADMIN_ERROR_LABELS.MISSING_USERNAME;
+        errorEl.hidden = false;
+        return;
+      }
+
+      btn.disabled = true;
+      let data;
+      try {
+        const res = await fetch('/api/admin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ master_password: masterInput.value, op: 'setUsername', member_id: memberId, username }),
+        });
+        data = await res.json();
+      } catch {
+        data = { ok: false, error: 'NETWORK_ERROR' };
+      }
+      btn.disabled = false;
+      if (!data.ok) {
+        errorEl.textContent = ADMIN_ERROR_LABELS[data.error] || `更新失敗：${data.error}`;
+        errorEl.hidden = false;
+        return;
+      }
+      await reloadDynamic();
+      showToast('帳號已更新。');
+      renderAdmin(appEl);
+    });
+  });
+
   document.getElementById('add-member-btn').addEventListener('click', async () => {
     const errorEl = document.getElementById('add-member-error');
     errorEl.hidden = true;
     const name = document.getElementById('new-member-name').value.trim();
     if (!name) {
       errorEl.textContent = ADMIN_ERROR_LABELS.MISSING_NAME;
+      errorEl.hidden = false;
+      return;
+    }
+    const username = document.getElementById('new-member-username').value.trim();
+    if (!username) {
+      errorEl.textContent = ADMIN_ERROR_LABELS.MISSING_USERNAME;
       errorEl.hidden = false;
       return;
     }
@@ -495,6 +558,7 @@ export async function renderAdmin(appEl) {
           op: 'addMember',
           member_id: name,
           name,
+          username,
           password: document.getElementById('new-member-password').value,
         }),
       });

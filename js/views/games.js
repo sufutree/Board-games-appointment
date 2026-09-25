@@ -1,5 +1,5 @@
 import {
-  activeHolders, activeMembers, activeVenues, reloadDynamic, allOwnerships,
+  activeHolders, activeVenues, reloadDynamic, allOwnerships,
   activeTags, tagGroups, tagLabel,
 } from '../store.js';
 import {
@@ -7,7 +7,7 @@ import {
   filterGames, formatPlayers, formatDuration, formatWeight,
 } from '../rules.js';
 import { writeAction, getSelfId } from '../api.js';
-import { openIdentityModal } from '../identityBar.js';
+import { requireSelfId } from '../identityBar.js';
 import { escapeHtml, showToast } from '../app.js';
 
 const BGG_ERROR_LABELS = {
@@ -18,15 +18,6 @@ const BGG_ERROR_LABELS = {
   UNAUTHENTICATED: '請先登入。',
   MISSING_MEMBER_ID: '請先登入。',
 };
-
-// 需要登入身分才能做的動作統一走這個：已登入就直接回傳 selfId，沒登入就
-// 跳出登入視窗，成功回傳新的 selfId，取消回傳 null。
-async function requireSelfId() {
-  const selfId = getSelfId();
-  if (selfId) return selfId;
-  const loggedIn = await openIdentityModal();
-  return loggedIn ? getSelfId() : null;
-}
 
 const CORRECTION_FIELDS = {
   name_zh: '中文名稱',
@@ -211,12 +202,11 @@ export async function renderGames(appEl) {
       const currentSelfId = await requireSelfId();
       if (!currentSelfId) return;
       const reallyHaveIt = allOwnerships().some((o) => o.holder_id === currentSelfId && o.bgg_id === item.bggId);
-      const member = activeMembers().find((m) => m.id === currentSelfId);
       const btn = document.getElementById('toggle-have-btn');
       btn.disabled = true;
       const result = await writeAction('toggleCollection', {
-        holder_id: currentSelfId, bgg_id: item.bggId, name_zh: meta.name_zh, has: !reallyHaveIt,
-      }, currentSelfId, member ? member.name : currentSelfId);
+        bgg_id: item.bggId, name_zh: meta.name_zh, has: !reallyHaveIt,
+      });
       btn.disabled = false;
       if (!result.ok) {
         if (result.error !== 'CANCELLED') showToast(`操作失敗：${result.error}`);
@@ -321,8 +311,7 @@ export async function renderGames(appEl) {
         const submitBtn = document.getElementById('new-game-submit');
         submitBtn.disabled = true;
         submitBtn.textContent = '查詢中…';
-        const member = activeMembers().find((m) => m.id === selfId);
-        const result = await writeAction('addGame', payload, selfId, member ? member.name : selfId);
+        const result = await writeAction('addGame', payload);
         if (!result.ok) {
           submitBtn.disabled = false;
           submitBtn.textContent = '送出';
@@ -450,7 +439,6 @@ export async function renderGames(appEl) {
 
         const selfId = await requireSelfId();
         if (!selfId) return;
-        const member = activeMembers().find((m) => m.id === selfId);
         const submitBtn = document.getElementById('correction-submit');
 
         if (field === 'tags') {
@@ -465,7 +453,7 @@ export async function renderGames(appEl) {
               group_code: groupSelect.value,
               group_label: groupSelect.selectedOptions[0].dataset.label,
               apply_to_bgg_id: item.bggId,
-            }, selfId, member ? member.name : selfId);
+            });
           } else {
             const checkedCodes = [...document.querySelectorAll('.tag-checkbox:checked')].map((el) => el.value);
             result = await writeAction('submitCorrection', {
@@ -474,7 +462,7 @@ export async function renderGames(appEl) {
               current_value: JSON.stringify(currentTagCodes),
               suggested_value: JSON.stringify(checkedCodes),
               note,
-            }, selfId, member ? member.name : selfId);
+            });
           }
           submitBtn.disabled = false;
           submitBtn.textContent = '送出給管理員審核';
@@ -512,7 +500,7 @@ export async function renderGames(appEl) {
           current_value: currentValueFor(field),
           suggested_value: suggestedValue,
           note,
-        }, selfId, member ? member.name : selfId);
+        });
         submitBtn.disabled = false;
         submitBtn.textContent = '送出給管理員審核';
         if (!result.ok) {
@@ -562,17 +550,15 @@ export async function renderGames(appEl) {
       document.getElementById('propose-venue-submit').addEventListener('click', async () => {
         const errorEl = document.getElementById('propose-venue-error');
         errorEl.hidden = true;
-        const selfId = await requireSelfId();
-        if (!selfId) return;
+        if (!(await requireSelfId())) return;
         const venueId = document.getElementById('propose-venue-select').value;
-        const member = activeMembers().find((m) => m.id === selfId);
 
         const submitBtn = document.getElementById('propose-venue-submit');
         submitBtn.disabled = true;
         submitBtn.textContent = '送出中…';
         const result = await writeAction('submitVenueCollection', {
           venue_id: venueId, bgg_id: item.bggId, name_zh: meta.name_zh,
-        }, selfId, member ? member.name : selfId);
+        });
         submitBtn.disabled = false;
         submitBtn.textContent = '送出給管理員審核';
         if (!result.ok) {

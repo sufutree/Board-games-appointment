@@ -1,25 +1,23 @@
-// 身分選擇：一個頁首固定的「你是：XXX／登入」列 + 一個彈出視窗選成員，
+// 身分：一個頁首固定的「你是：XXX／登入」列 + 一個彈出視窗做帳號密碼登入，
 // 取代原本每個頁面（event.js、games.js）各自畫一大排名字按鈕、卡在頁面
-// 中間打斷操作的做法。選完就把視窗收起來，不佔用頁面版面。
+// 中間打斷操作的做法，也取代「點名字再輸密碼」——現在是正規的帳號＋密碼
+// 表單，一次送出。
 import { memberById } from './store.js';
-import { getSelfId, clearSelfId, verifySecret, promptPassword } from './api.js';
-import { escapeHtml } from './app.js';
+import { getSelfId, clearSelfId, verifySecret, promptPassword, changeOwnPassword } from './api.js';
+import { escapeHtml, showToast } from './app.js';
 
-let currentMembers = [];
 let onIdentityChange = null;
 
-// app.js 開機時呼叫一次：members 是完整成員清單，onChange 在登入狀態改變
-// （登入成功或登出）後被呼叫，通常是重新畫目前路由，因為投票、報名這些
-// 畫面都跟登入身分有關。
+// app.js 開機時呼叫一次：onChange 在登入狀態改變（登入成功或登出）後被
+// 呼叫，通常是重新畫目前路由，因為投票、報名這些畫面都跟登入身分有關。
 export function initHeaderIdentity(members, onChange) {
-  currentMembers = members;
   onIdentityChange = onChange;
   renderHeaderIdentity();
 }
 
-// 成員名單變動（例如 admin 新增/刪除成員）後呼叫，讓彈出視窗的選項跟著更新。
-export function updateHeaderIdentityMembers(members) {
-  currentMembers = members;
+// 目前沒有頁面會動態改變成員清單後需要重畫頁首，保留這個函式名稱只是
+// 為了介面穩定，之後真的需要時再擴充。
+export function updateHeaderIdentityMembers() {
   renderHeaderIdentity();
 }
 
@@ -32,6 +30,7 @@ function renderHeaderIdentity() {
   if (selfId && member) {
     el.innerHTML = `
       <span>你是：<strong>${escapeHtml(member.name)}</strong></span>
+      <a href="#" id="header-change-password-link">修改密碼</a>
       <a href="#" id="header-logout-link">登出</a>
     `;
     document.getElementById('header-logout-link').addEventListener('click', async (e) => {
@@ -39,6 +38,19 @@ function renderHeaderIdentity() {
       await clearSelfId();
       renderHeaderIdentity();
       if (onIdentityChange) onIdentityChange();
+    });
+    document.getElementById('header-change-password-link').addEventListener('click', async (e) => {
+      e.preventDefault();
+      const current = await promptPassword('目前密碼', false);
+      if (current == null) return;
+      const next = await promptPassword('新密碼（留空＝清空密碼）', false);
+      if (next == null) return;
+      const result = await changeOwnPassword(current, next);
+      if (!result.ok) {
+        showToast(result.error === 'BAD_SECRET' ? '目前密碼不對，密碼沒有被更改。' : `更新失敗：${result.error}`);
+        return;
+      }
+      showToast('密碼已更新。');
     });
     return;
   }
@@ -50,59 +62,75 @@ function renderHeaderIdentity() {
   });
 }
 
-// 彈出「你是哪一位？」視窗。回傳 Promise<boolean>，true＝登入成功，
-// false＝使用者取消。呼叫端（event.js／games.js 裡「請先登入」的連結）
-// 可以自己 await 這個結果決定要不要重畫畫面。
+// 需要登入身分才能做的動作統一走這個：已登入就直接回傳 selfId，沒登入就
+// 跳出登入視窗，成功回傳新的 selfId，取消回傳 null。
+export async function requireSelfId() {
+  const selfId = getSelfId();
+  if (selfId) return selfId;
+  const loggedIn = await openIdentityModal();
+  return loggedIn ? getSelfId() : null;
+}
+
+// 彈出帳號＋密碼登入視窗。回傳 Promise<boolean>，true＝登入成功，
+// false＝使用者取消。
 export function openIdentityModal() {
   return new Promise((resolve) => {
     const overlay = document.getElementById('identity-modal');
-    const listEl = document.getElementById('identity-modal-list');
+    const usernameInput = document.getElementById('login-username');
+    const passwordInput = document.getElementById('login-password');
+    const errorEl = document.getElementById('login-error');
     const cancelBtn = document.getElementById('identity-modal-cancel');
+    const submitBtn = document.getElementById('identity-modal-submit');
 
-    listEl.innerHTML = currentMembers.map((m) => `
-      <button type="button" class="btn btn-sm" data-member-id="${escapeHtml(m.id)}">${escapeHtml(m.name)}</button>
-    `).join('');
+    usernameInput.value = '';
+    passwordInput.value = '';
+    errorEl.hidden = true;
     overlay.hidden = false;
+    usernameInput.focus();
 
-    function finish(result) {
+    function cleanup() {
       overlay.hidden = true;
       cancelBtn.removeEventListener('click', onCancel);
-      resolve(result);
+      submitBtn.removeEventListener('click', onSubmit);
+      usernameInput.removeEventListener('keydown', onKeydown);
+      passwordInput.removeEventListener('keydown', onKeydown);
     }
     function onCancel() {
-      finish(false);
+      cleanup();
+      resolve(false);
     }
+    function onKeydown(e) {
+      if (e.key === 'Enter') onSubmit();
+      if (e.key === 'Escape') onCancel();
+    }
+    async function onSubmit() {
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value;
+      if (!username) {
+        errorEl.textContent = '請輸入帳號。';
+        errorEl.hidden = false;
+        return;
+      }
+      errorEl.hidden = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = '登入中…';
+      const result = await verifySecret(username, password);
+      submitBtn.disabled = false;
+      submitBtn.textContent = '登入';
+      if (!result.ok) {
+        errorEl.textContent = '帳號或密碼錯誤。';
+        errorEl.hidden = false;
+        return;
+      }
+      cleanup();
+      renderHeaderIdentity();
+      if (onIdentityChange) onIdentityChange();
+      resolve(true);
+    }
+
     cancelBtn.addEventListener('click', onCancel);
-
-    listEl.querySelectorAll('button[data-member-id]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const memberId = btn.dataset.memberId;
-        const member = memberById(memberId);
-        const label = member ? member.name : memberId;
-        const allButtons = listEl.querySelectorAll('button[data-member-id]');
-
-        let password = await promptPassword(label, false);
-        if (password == null) return; // 使用者取消密碼框，留在選人清單
-
-        allButtons.forEach((b) => { b.disabled = true; });
-        btn.textContent = `${label}（驗證中…）`;
-
-        let result = await verifySecret(memberId, password);
-        while (!result.ok) {
-          password = await promptPassword(label, true);
-          if (password == null) {
-            allButtons.forEach((b) => { b.disabled = false; });
-            btn.textContent = label;
-            return;
-          }
-          btn.textContent = `${label}（驗證中…）`;
-          result = await verifySecret(memberId, password);
-        }
-
-        renderHeaderIdentity();
-        if (onIdentityChange) onIdentityChange();
-        finish(true);
-      });
-    });
+    submitBtn.addEventListener('click', onSubmit);
+    usernameInput.addEventListener('keydown', onKeydown);
+    passwordInput.addEventListener('keydown', onKeydown);
   });
 }

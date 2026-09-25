@@ -25,6 +25,7 @@ export default async function handler(req, res) {
   if (op === 'addMember') return addMember(req, res);
   if (op === 'deleteMember') return deleteMember(req, res);
   if (op === 'setPassword') return setPassword(req, res);
+  if (op === 'setUsername') return setUsername(req, res);
   if (op === 'addVenue') return addVenue(req, res);
   if (op === 'deleteVenue') return deleteVenue(req, res);
   if (op === 'reviewCorrection') return reviewCorrection(req, res);
@@ -36,27 +37,38 @@ export default async function handler(req, res) {
   return res.status(400).json({ ok: false, error: 'UNKNOWN_OP' });
 }
 
-// 新增成員。取代原本在 Sheets members 分頁手動加一列。
+// 新增成員。取代原本在 Sheets members 分頁手動加一列。username 是登入用的
+// 英文/拼音帳號，跟顯示用的中文姓名分開；username → member_id 的對照表
+// 存在 usernames 集合，登入時用它查出真正的 member_id 再走原本的密碼驗證。
 async function addMember(req, res) {
-  const { member_id, name, password } = req.body || {};
+  const { member_id, name, password, username } = req.body || {};
   const id = String(member_id || name || '').trim();
   if (!id) return res.status(400).json({ ok: false, error: 'MISSING_NAME' });
+  const uname = String(username || '').trim();
+  if (!uname) return res.status(400).json({ ok: false, error: 'MISSING_USERNAME' });
 
   const existing = await db.collection('members').doc(id).get();
   if (existing.exists) return res.status(409).json({ ok: false, error: 'ALREADY_EXISTS' });
+  const existingUsername = await db.collection('usernames').doc(uname).get();
+  if (existingUsername.exists) return res.status(409).json({ ok: false, error: 'USERNAME_TAKEN' });
 
-  await db.collection('members').doc(id).set({ id, name: name || id, type: 'person', active: true });
+  await db.collection('members').doc(id).set({ id, name: name || id, username: uname, type: 'person', active: true });
   await db.collection('member_secrets').doc(id).set({ password: password || '' });
+  await db.collection('usernames').doc(uname).set({ member_id: id });
 
   return res.status(200).json({ ok: true });
 }
 
-// 刪除成員（含密碼資料）。真的移除，不是軟刪除；歷史投票/報名紀錄裡對這個
-// member_id 的引用會變成查無此人，畫面上會用 id 原文顯示，不會壞掉。
+// 刪除成員（含密碼、帳號資料）。真的移除，不是軟刪除；歷史投票/報名紀錄裡
+// 對這個 member_id 的引用會變成查無此人，畫面上會用 id 原文顯示，不會壞掉。
 async function deleteMember(req, res) {
   const { member_id } = req.body || {};
   if (!member_id) return res.status(400).json({ ok: false, error: 'MISSING_MEMBER_ID' });
 
+  const memberSnap = await db.collection('members').doc(String(member_id)).get();
+  if (memberSnap.exists && memberSnap.data().username) {
+    await db.collection('usernames').doc(String(memberSnap.data().username)).delete();
+  }
   await db.collection('members').doc(String(member_id)).delete();
   await db.collection('member_secrets').doc(String(member_id)).delete();
 
@@ -72,6 +84,32 @@ async function setPassword(req, res) {
   if (!memberSnap.exists) return res.status(404).json({ ok: false, error: 'MEMBER_NOT_FOUND' });
 
   await db.collection('member_secrets').doc(String(member_id)).set({ password: new_password || '' });
+
+  return res.status(200).json({ ok: true });
+}
+
+// 設定／變更某個成員的登入帳號（既有成員原本沒有帳號，或想換一個）。
+async function setUsername(req, res) {
+  const { member_id, username } = req.body || {};
+  if (!member_id) return res.status(400).json({ ok: false, error: 'MISSING_MEMBER_ID' });
+  const uname = String(username || '').trim();
+  if (!uname) return res.status(400).json({ ok: false, error: 'MISSING_USERNAME' });
+
+  const memberRef = db.collection('members').doc(String(member_id));
+  const memberSnap = await memberRef.get();
+  if (!memberSnap.exists) return res.status(404).json({ ok: false, error: 'MEMBER_NOT_FOUND' });
+
+  const existingUsername = await db.collection('usernames').doc(uname).get();
+  if (existingUsername.exists && existingUsername.data().member_id !== String(member_id)) {
+    return res.status(409).json({ ok: false, error: 'USERNAME_TAKEN' });
+  }
+
+  const oldUsername = memberSnap.data().username;
+  if (oldUsername && oldUsername !== uname) {
+    await db.collection('usernames').doc(String(oldUsername)).delete();
+  }
+  await db.collection('usernames').doc(uname).set({ member_id: String(member_id) });
+  await memberRef.set({ username: uname }, { merge: true });
 
   return res.status(200).json({ ok: true });
 }

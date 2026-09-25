@@ -1,8 +1,10 @@
 // 可玩清單計算、篩選、已結束判定、分類代碼表。
-import { store, allOwnerships, getGameMeta, holderName, venueById, signupsOfEvent } from './store.js';
+import { store, allOwnerships, getGameMeta, holderName, venueById } from './store.js';
 
-// §3.3 可玩清單 = (所有已報名玩家各自的收藏) ∪ (該場地自己的收藏)
-export function computePlayableList(event) {
+// §3.3 可玩清單 = (參與者各自的收藏) ∪ (該場地自己的收藏)。
+// participantMemberIds 由呼叫端決定「參與者」是誰：成團後是報名名單，
+// 投票中則是目前投「可以」的那個時段的人（event.js 決定，這裡只負責算）。
+export function computePlayableList(event, participantMemberIds) {
   const holderIds = new Set();
   let venueHolderId = null;
 
@@ -11,9 +13,8 @@ export function computePlayableList(event) {
     holderIds.add(event.venue_id);
   }
 
-  const signups = signupsOfEvent(event.event_id);
-  for (const s of signups) {
-    holderIds.add(s.member_id);
+  for (const id of (participantMemberIds || [])) {
+    holderIds.add(id);
   }
 
   if (holderIds.size === 0) return [];

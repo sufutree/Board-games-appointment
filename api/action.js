@@ -28,12 +28,18 @@ export default async function handler(req, res) {
   return res.status(400).json({ ok: false, error: 'UNKNOWN_ACTION' });
 }
 
-// 密碼驗證＋發 Firebase 登入權杖。驗證成功後不只是回 ok:true，還會多發一個
-// 自訂權杖給前端去換成真正的登入狀態，之後投票/報名可以直接用這個身分寫
-// Firestore，不用再打這支 API。
+// 帳號（username）+ 密碼驗證＋發 Firebase 登入權杖。username 是英文/拼音
+// 帳號，跟顯示用的中文姓名分開，先查 usernames 對照表換出真正的
+// member_id，再走原本的密碼驗證。驗證成功後不只是回 ok:true，還會多發
+// 一個自訂權杖給前端去換成真正的登入狀態，之後投票/報名可以直接用這個
+// 身分寫 Firestore，不用再打這支 API。
 async function login(req, res) {
-  const { member_id, secret } = req.body || {};
-  if (!member_id) return res.status(400).json({ ok: false, error: 'BAD_REQUEST' });
+  const { username, secret } = req.body || {};
+  if (!username) return res.status(400).json({ ok: false, error: 'BAD_REQUEST' });
+
+  const usernameSnap = await db.collection('usernames').doc(String(username)).get();
+  if (!usernameSnap.exists) return res.status(200).json({ ok: false, error: 'BAD_SECRET' });
+  const member_id = usernameSnap.data().member_id;
 
   const ok = await checkSecret(db, member_id, secret);
   if (!ok) return res.status(200).json({ ok: false, error: 'BAD_SECRET' });

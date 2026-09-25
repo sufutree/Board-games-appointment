@@ -1,14 +1,16 @@
-import { activeMembers, activeVenues, reloadDynamic } from '../store.js';
+import { activeVenues, memberById, reloadDynamic } from '../store.js';
 import { allGamesWithHolders, venueQualifies } from '../rules.js';
-import { writeAction } from '../api.js';
+import { writeAction, getSelfId } from '../api.js';
+import { requireSelfId } from '../identityBar.js';
 import { escapeHtml, showToast } from '../app.js';
 
 const MAX_SLOTS = 4;
 const MIN_SLOTS = 1;
 
 export async function renderNewEvent(appEl) {
-  const members = activeMembers();
   const venues = activeVenues();
+  const selfId = getSelfId();
+  const selfMember = selfId ? memberById(selfId) : null;
 
   const state = {
     slots: [
@@ -27,10 +29,8 @@ export async function renderNewEvent(appEl) {
       </div>
 
       <div class="form-group">
-        <label class="form-label" for="f-creator">發起人</label>
-        <select class="form-control" id="f-creator">
-          ${members.map((m) => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`).join('')}
-        </select>
+        <label class="form-label">發起人</label>
+        <p class="card-meta">${selfMember ? `你（${escapeHtml(selfMember.name)}）` : '尚未登入，送出時會請你先登入'}</p>
       </div>
 
       <div class="form-group">
@@ -90,7 +90,6 @@ export async function renderNewEvent(appEl) {
 
   const slotRowsEl = document.getElementById('slot-rows');
   const addSlotBtn = document.getElementById('add-slot');
-  const creatorSelect = document.getElementById('f-creator');
   const venueSelect = document.getElementById('f-venue');
   const venueTextInput = document.getElementById('f-venue-text');
   const venueWarningEl = document.getElementById('venue-warning');
@@ -163,7 +162,6 @@ export async function renderNewEvent(appEl) {
     venueTextInput.style.display = venueSelect.value === '__other__' ? '' : 'none';
     updateVenueWarning();
   });
-  creatorSelect.addEventListener('change', updateVenueWarning);
 
   // 線上團沒有「誰能開這個場地」的概念，警示只對實體場地有意義。
   function updateVenueWarning() {
@@ -172,11 +170,12 @@ export async function renderNewEvent(appEl) {
       return;
     }
     const venue = venues.find((v) => v.id === venueSelect.value);
-    if (!venue || !creatorSelect.value || venueQualifies(venue, [creatorSelect.value])) {
+    const currentSelfId = getSelfId();
+    if (!venue || !currentSelfId || venueQualifies(venue, [currentSelfId])) {
       venueWarningEl.hidden = true;
       return;
     }
-    venueWarningEl.textContent = '⚠️ 發起人目前不在這個場地的開放名單內，仍可送出。';
+    venueWarningEl.textContent = '⚠️ 你目前不在這個場地的開放名單內，仍可送出。';
     venueWarningEl.hidden = false;
   }
   updateVenueWarning();
@@ -254,13 +253,9 @@ export async function renderNewEvent(appEl) {
     const title = document.getElementById('f-title').value.trim();
     if (!title) return showError('請輸入團名。');
 
-    const creatorId = document.getElementById('f-creator').value;
-    if (!creatorId) return showError('請選擇發起人。');
-
     if (state.slots.some((s) => !s.date)) return showError('請完整填寫每個候選時段的日期。');
 
     const payload = {
-      creator_id: creatorId,
       title,
       slots: state.slots.map((s) => ({ date: s.date, period: s.period })),
       game_bgg_ids: state.selectedGames.map((g) => g.bggId),
@@ -281,12 +276,13 @@ export async function renderNewEvent(appEl) {
       payload.venue_id = venueSelect.value;
     }
 
+    if (!(await requireSelfId())) return;
+
     const submitBtn = document.getElementById('submit-btn');
     submitBtn.disabled = true;
     submitBtn.textContent = '送出中…';
 
-    const creatorMember = members.find((m) => m.id === creatorId);
-    const result = await writeAction('createEvent', payload, creatorId, creatorMember ? creatorMember.name : creatorId);
+    const result = await writeAction('createEvent', payload);
 
     if (!result.ok) {
       submitBtn.disabled = false;
