@@ -14,6 +14,7 @@ const ADMIN_ERROR_LABELS = {
   MISSING_MEMBER_ID: '請選擇成員。',
   MISSING_USERNAME: '請輸入帳號。',
   USERNAME_TAKEN: '這個帳號已經有人用了。',
+  VENUE_NOT_FOUND: '找不到這個地點。',
 };
 
 const CORRECTION_FIELD_LABELS = {
@@ -177,6 +178,34 @@ export async function renderAdmin(appEl) {
     </div>
 
     <div class="card">
+      <div class="section-title">編輯地點</div>
+      ${venues.length === 0 ? '<p class="card-meta">目前沒有地點。</p>' : `
+        <div class="form-group">
+          <label class="form-label" for="edit-venue-select">地點</label>
+          <select class="form-control" id="edit-venue-select">
+            ${venues.map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="edit-venue-name">名稱</label>
+          <input class="form-control" id="edit-venue-name">
+        </div>
+        <div class="form-group">
+          <label class="form-label">開放名單（誰能開這個場地，不選＝誰都能選）</label>
+          <div style="display:flex; flex-wrap:wrap; gap:8px;">
+            ${members.map((m) => `
+              <label style="display:flex; align-items:center; gap:4px;">
+                <input type="checkbox" class="edit-venue-unlock-member" value="${escapeHtml(m.id)}"> ${escapeHtml(m.name)}
+              </label>
+            `).join('')}
+          </div>
+        </div>
+        <p id="edit-venue-error" class="error-text" hidden></p>
+        <button type="button" id="edit-venue-btn" class="btn btn-primary btn-sm">儲存</button>
+      `}
+    </div>
+
+    <div class="card">
       <div class="section-title">刪除地點</div>
       ${venues.length === 0 ? '<p class="card-meta">目前沒有地點。</p>' : `
         <div class="form-group">
@@ -207,20 +236,6 @@ export async function renderAdmin(appEl) {
       </div>
       <p id="add-member-error" class="error-text" hidden></p>
       <button type="button" id="add-member-btn" class="btn btn-primary btn-sm">新增</button>
-    </div>
-
-    <div class="card">
-      <div class="section-title">帳號設定</div>
-      ${members.length === 0 ? '<p class="card-meta">目前沒有成員。</p>' : members.map((m) => `
-        <div class="form-group" style="display:flex; gap:8px; align-items:flex-end;">
-          <div style="flex:1;">
-            <label class="form-label">${escapeHtml(m.name)}${m.username ? '' : '（尚未設定帳號）'}</label>
-            <input class="form-control" data-username-for="${escapeHtml(m.id)}" value="${escapeHtml(m.username || '')}" autocomplete="off">
-          </div>
-          <button type="button" class="btn btn-sm" data-set-username-for="${escapeHtml(m.id)}">儲存</button>
-        </div>
-      `).join('')}
-      <p id="set-username-error" class="error-text" hidden></p>
     </div>
 
     <div class="card">
@@ -492,42 +507,61 @@ export async function renderAdmin(appEl) {
     });
   }
 
-  document.querySelectorAll('button[data-set-username-for]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const errorEl = document.getElementById('set-username-error');
+  const editVenueSelect = document.getElementById('edit-venue-select');
+  const editVenueNameInput = document.getElementById('edit-venue-name');
+  function populateEditVenueForm() {
+    const venue = venues.find((v) => v.id === editVenueSelect.value);
+    if (!venue) return;
+    editVenueNameInput.value = venue.name || venue.id;
+    const unlockIds = String(venue.unlock_member_ids || '').split(',').map((s) => s.trim()).filter(Boolean);
+    document.querySelectorAll('.edit-venue-unlock-member').forEach((cb) => {
+      cb.checked = unlockIds.includes(cb.value);
+    });
+  }
+  if (editVenueSelect) {
+    populateEditVenueForm();
+    editVenueSelect.addEventListener('change', populateEditVenueForm);
+  }
+
+  const editVenueBtn = document.getElementById('edit-venue-btn');
+  if (editVenueBtn) {
+    editVenueBtn.addEventListener('click', async () => {
+      const errorEl = document.getElementById('edit-venue-error');
       errorEl.hidden = true;
-      const memberId = btn.dataset.setUsernameFor;
-      const input = document.querySelector(`input[data-username-for="${CSS.escape(memberId)}"]`);
-      const username = input.value.trim();
-      if (!username) {
-        errorEl.textContent = ADMIN_ERROR_LABELS.MISSING_USERNAME;
+      const venueId = editVenueSelect.value;
+      const name = editVenueNameInput.value.trim();
+      if (!name) {
+        errorEl.textContent = '請輸入名稱。';
         errorEl.hidden = false;
         return;
       }
+      const unlockIds = [...document.querySelectorAll('.edit-venue-unlock-member:checked')].map((el) => el.value);
 
-      btn.disabled = true;
+      editVenueBtn.disabled = true;
+      editVenueBtn.textContent = '處理中…';
       let data;
       try {
         const res = await fetch('/api/admin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ master_password: masterInput.value, op: 'setUsername', member_id: memberId, username }),
+          body: JSON.stringify({ master_password: masterInput.value, op: 'editVenue', venue_id: venueId, name, unlock_member_ids: unlockIds }),
         });
         data = await res.json();
       } catch {
         data = { ok: false, error: 'NETWORK_ERROR' };
       }
-      btn.disabled = false;
+      editVenueBtn.disabled = false;
+      editVenueBtn.textContent = '儲存';
       if (!data.ok) {
         errorEl.textContent = ADMIN_ERROR_LABELS[data.error] || `更新失敗：${data.error}`;
         errorEl.hidden = false;
         return;
       }
       await reloadDynamic();
-      showToast('帳號已更新。');
+      showToast('地點已更新。');
       renderAdmin(appEl);
     });
-  });
+  }
 
   document.getElementById('add-member-btn').addEventListener('click', async () => {
     const errorEl = document.getElementById('add-member-error');

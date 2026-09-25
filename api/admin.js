@@ -27,6 +27,7 @@ export default async function handler(req, res) {
   if (op === 'setPassword') return setPassword(req, res);
   if (op === 'setUsername') return setUsername(req, res);
   if (op === 'addVenue') return addVenue(req, res);
+  if (op === 'editVenue') return editVenue(req, res);
   if (op === 'deleteVenue') return deleteVenue(req, res);
   if (op === 'reviewCorrection') return reviewCorrection(req, res);
   if (op === 'reviewVenueCollection') return reviewVenueCollection(req, res);
@@ -130,6 +131,28 @@ async function addVenue(req, res) {
     note: note || '',
     active: true,
   });
+
+  return res.status(200).json({ ok: true });
+}
+
+// 編輯地點。id（doc key，同時是所有事件/收藏拿來當外鍵用的 venue_id）
+// 一律不能改，能改的只有顯示名稱跟開放名單，跟 updateProfile 對 member_id
+// 的處理是同一種「識別碼固定，顯示資訊可改」的取捨。
+async function editVenue(req, res) {
+  const { venue_id, name, unlock_member_ids } = req.body || {};
+  if (!venue_id) return res.status(400).json({ ok: false, error: 'MISSING_VENUE_ID' });
+
+  const ref = db.collection('venues').doc(String(venue_id));
+  const snap = await ref.get();
+  if (!snap.exists) return res.status(404).json({ ok: false, error: 'VENUE_NOT_FOUND' });
+
+  const updates = {};
+  const trimmedName = String(name || '').trim();
+  if (trimmedName) updates.name = trimmedName;
+  if (unlock_member_ids !== undefined) {
+    updates.unlock_member_ids = Array.isArray(unlock_member_ids) ? unlock_member_ids.join(',') : (unlock_member_ids || '');
+  }
+  await ref.set(updates, { merge: true });
 
   return res.status(200).json({ ok: true });
 }
