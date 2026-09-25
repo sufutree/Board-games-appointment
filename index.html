@@ -40,15 +40,29 @@
     </div>
   </div>
 
-  <div id="secret-modal" class="modal-overlay" hidden>
+  <div id="profile-modal" class="modal-overlay" hidden>
     <div class="modal">
-      <h2>需要密碼</h2>
-      <p id="secret-desc">請輸入密碼。</p>
-      <input id="secret-input" type="password" inputmode="text" autocomplete="off" placeholder="密碼">
-      <p id="secret-error" class="error-text" hidden>密碼錯誤，請再試一次。</p>
+      <h2>修改資訊</h2>
+      <div class="form-group">
+        <label class="form-label" for="profile-name">顯示姓名</label>
+        <input class="form-control" id="profile-name" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="profile-username">帳號</label>
+        <input class="form-control" id="profile-username" autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="profile-password">新密碼（留空＝不變更）</label>
+        <input class="form-control" id="profile-password" type="password" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="profile-current-password">目前密碼（確認身分用）</label>
+        <input class="form-control" id="profile-current-password" type="password" autocomplete="current-password">
+      </div>
+      <p id="profile-error" class="error-text" hidden></p>
       <div class="modal-actions">
-        <button id="secret-cancel" class="btn btn-ghost">取消</button>
-        <button id="secret-confirm" class="btn btn-primary">確認</button>
+        <button id="profile-modal-cancel" class="btn btn-ghost">取消</button>
+        <button id="profile-modal-submit" class="btn btn-primary">儲存</button>
       </div>
     </div>
   </div>

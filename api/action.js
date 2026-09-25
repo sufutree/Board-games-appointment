@@ -22,7 +22,7 @@ export default async function handler(req, res) {
   if (action === 'confirm') return confirm(req, res, uid);
   if (action === 'cancelEvent') return cancelEvent(req, res, uid);
   if (action === 'updateEventDetails') return updateEventDetails(req, res, uid);
-  if (action === 'setOwnPassword') return setOwnPassword(req, res, uid);
+  if (action === 'updateProfile') return updateProfile(req, res, uid);
   if (action === 'addGame') return addGame(req, res, uid);
 
   return res.status(400).json({ ok: false, error: 'UNKNOWN_ACTION' });
@@ -175,14 +175,45 @@ async function updateEventDetails(req, res, uid) {
   return res.status(200).json({ ok: true });
 }
 
-// 登入身分自己改自己的密碼，不需要主密碼。要求再輸入一次目前密碼，避免
-// 裝置忘記登出被別人接手亂改。
-async function setOwnPassword(req, res, uid) {
-  const { current_password, new_password } = req.body || {};
+// 登入身分自己改自己的顯示姓名／帳號／密碼，不需要主密碼，但要再輸入一次
+// 目前密碼，避免裝置忘記登出被別人接手亂改。三個欄位都選填，只改有填的。
+// 注意：這裡只改 member.name（畫面顯示用），不動 member_id 本身——
+// member_id 同時是 Firestore 文件 id 跟 Firebase Auth uid，被投票／報名／
+// 收藏等一堆地方當外鍵用，改了會牽動太多資料，所以不開放自助改。
+async function updateProfile(req, res, uid) {
+  const { current_password, new_name, new_username, new_password } = req.body || {};
   const ok = await checkSecret(db, uid, current_password);
   if (!ok) return res.status(200).json({ ok: false, error: 'BAD_SECRET' });
 
-  await db.collection('member_secrets').doc(uid).set({ password: new_password || '' });
+  const memberRef = db.collection('members').doc(uid);
+  const memberSnap = await memberRef.get();
+  if (!memberSnap.exists) return res.status(404).json({ ok: false, error: 'MEMBER_NOT_FOUND' });
+
+  const name = String(new_name || '').trim();
+  if (name) {
+    await memberRef.set({ name }, { merge: true });
+  }
+
+  const username = String(new_username || '').trim();
+  if (username) {
+    const currentUsername = memberSnap.data().username;
+    if (username !== currentUsername) {
+      const existingUsername = await db.collection('usernames').doc(username).get();
+      if (existingUsername.exists && existingUsername.data().member_id !== uid) {
+        return res.status(200).json({ ok: false, error: 'USERNAME_TAKEN' });
+      }
+      if (currentUsername) {
+        await db.collection('usernames').doc(String(currentUsername)).delete();
+      }
+      await db.collection('usernames').doc(username).set({ member_id: uid });
+      await memberRef.set({ username }, { merge: true });
+    }
+  }
+
+  if (new_password) {
+    await db.collection('member_secrets').doc(uid).set({ password: new_password });
+  }
+
   return res.status(200).json({ ok: true });
 }
 

@@ -16,61 +16,22 @@
 // 這裡不再自動跳登入視窗（避免循環 import：identityBar.js 已經依賴這個檔案）。
 import { doc, collection, setDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { db, loginAs, getIdToken, getSelfId } from './firebase.js';
-import { memberById } from './store.js';
+import { memberById, reloadDynamic } from './store.js';
 
 export { getSelfId, clearSelfId } from './firebase.js';
-
-// 跳出密碼輸入框，回傳使用者輸入的密碼；取消則回傳 null。現在只用在「自己
-// 改自己的密碼」這種已經知道是誰、只是要再驗一次密碼的場合，登入本身改用
-// identityBar.js 的帳號＋密碼表單。
-export function promptPassword(label, showError) {
-  return new Promise((resolve) => {
-    const overlay = document.getElementById('secret-modal');
-    const desc = document.getElementById('secret-desc');
-    const input = document.getElementById('secret-input');
-    const errorEl = document.getElementById('secret-error');
-    const confirmBtn = document.getElementById('secret-confirm');
-    const cancelBtn = document.getElementById('secret-cancel');
-
-    desc.textContent = label ? `請輸入「${label}」：` : '請輸入密碼：';
-    errorEl.hidden = !showError;
-    input.value = '';
-    overlay.hidden = false;
-    input.focus();
-
-    function cleanup() {
-      overlay.hidden = true;
-      confirmBtn.removeEventListener('click', onConfirm);
-      cancelBtn.removeEventListener('click', onCancel);
-      input.removeEventListener('keydown', onKeydown);
-    }
-    function onConfirm() {
-      const val = input.value;
-      cleanup();
-      resolve(val);
-    }
-    function onCancel() {
-      cleanup();
-      resolve(null);
-    }
-    function onKeydown(e) {
-      if (e.key === 'Enter') onConfirm();
-      if (e.key === 'Escape') onCancel();
-    }
-    confirmBtn.addEventListener('click', onConfirm);
-    cancelBtn.addEventListener('click', onCancel);
-    input.addEventListener('keydown', onKeydown);
-  });
-}
 
 // 帳號＋密碼登入。
 export async function verifySecret(username, secret) {
   return loginAs(username, secret);
 }
 
-// 目前登入的身分自己改自己的密碼，要再輸一次目前密碼確認。
-export async function changeOwnPassword(currentPassword, newPassword) {
-  return callApi('setOwnPassword', { current_password: currentPassword, new_password: newPassword });
+// 自己改自己的顯示姓名／帳號／密碼，欄位都選填（沒填就不動），但要再輸入
+// 一次目前密碼確認身分。成功後重新載入 store，讓改名之類的變動馬上反映在
+// 畫面上。
+export async function updateProfile({ current_password, new_name, new_username, new_password }) {
+  const result = await callApi('updateProfile', { current_password, new_name, new_username, new_password });
+  if (result.ok) await reloadDynamic();
+  return result;
 }
 
 // 執行一個寫入動作。呼叫端要先確保已經登入（identityBar.js 的

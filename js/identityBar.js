@@ -3,7 +3,7 @@
 // 中間打斷操作的做法，也取代「點名字再輸密碼」——現在是正規的帳號＋密碼
 // 表單，一次送出。
 import { memberById } from './store.js';
-import { getSelfId, clearSelfId, verifySecret, promptPassword, changeOwnPassword } from './api.js';
+import { getSelfId, clearSelfId, verifySecret, updateProfile } from './api.js';
 import { escapeHtml, showToast } from './app.js';
 
 let onIdentityChange = null;
@@ -30,7 +30,7 @@ function renderHeaderIdentity() {
   if (selfId && member) {
     el.innerHTML = `
       <span>你是：<strong>${escapeHtml(member.name)}</strong></span>
-      <a href="#" id="header-change-password-link">修改密碼</a>
+      <a href="#" id="header-edit-profile-link">修改資訊</a>
       <a href="#" id="header-logout-link">登出</a>
     `;
     document.getElementById('header-logout-link').addEventListener('click', async (e) => {
@@ -39,18 +39,9 @@ function renderHeaderIdentity() {
       renderHeaderIdentity();
       if (onIdentityChange) onIdentityChange();
     });
-    document.getElementById('header-change-password-link').addEventListener('click', async (e) => {
+    document.getElementById('header-edit-profile-link').addEventListener('click', (e) => {
       e.preventDefault();
-      const current = await promptPassword('目前密碼', false);
-      if (current == null) return;
-      const next = await promptPassword('新密碼（留空＝清空密碼）', false);
-      if (next == null) return;
-      const result = await changeOwnPassword(current, next);
-      if (!result.ok) {
-        showToast(result.error === 'BAD_SECRET' ? '目前密碼不對，密碼沒有被更改。' : `更新失敗：${result.error}`);
-        return;
-      }
-      showToast('密碼已更新。');
+      openProfileModal(member);
     });
     return;
   }
@@ -132,5 +123,72 @@ export function openIdentityModal() {
     submitBtn.addEventListener('click', onSubmit);
     usernameInput.addEventListener('keydown', onKeydown);
     passwordInput.addEventListener('keydown', onKeydown);
+  });
+}
+
+// 彈出「修改資訊」視窗：顯示姓名／帳號／密碼都可以改，都選填（沒填就不
+// 動），但要再輸入一次目前密碼確認身分。
+function openProfileModal(member) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('profile-modal');
+    const nameInput = document.getElementById('profile-name');
+    const usernameInput = document.getElementById('profile-username');
+    const passwordInput = document.getElementById('profile-password');
+    const currentInput = document.getElementById('profile-current-password');
+    const errorEl = document.getElementById('profile-error');
+    const cancelBtn = document.getElementById('profile-modal-cancel');
+    const submitBtn = document.getElementById('profile-modal-submit');
+
+    nameInput.value = member.name || '';
+    usernameInput.value = member.username || '';
+    passwordInput.value = '';
+    currentInput.value = '';
+    errorEl.hidden = true;
+    overlay.hidden = false;
+    nameInput.focus();
+
+    function cleanup() {
+      overlay.hidden = true;
+      cancelBtn.removeEventListener('click', onCancel);
+      submitBtn.removeEventListener('click', onSubmit);
+    }
+    function onCancel() {
+      cleanup();
+      resolve(false);
+    }
+    async function onSubmit() {
+      const current_password = currentInput.value;
+      if (!current_password) {
+        errorEl.textContent = '請輸入目前密碼以確認身分。';
+        errorEl.hidden = false;
+        return;
+      }
+      errorEl.hidden = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = '儲存中…';
+      const result = await updateProfile({
+        current_password,
+        new_name: nameInput.value.trim(),
+        new_username: usernameInput.value.trim(),
+        new_password: passwordInput.value,
+      });
+      submitBtn.disabled = false;
+      submitBtn.textContent = '儲存';
+      if (!result.ok) {
+        errorEl.textContent = result.error === 'BAD_SECRET' ? '目前密碼不對，沒有任何變更。'
+          : result.error === 'USERNAME_TAKEN' ? '這個帳號已經有人用了。'
+          : `更新失敗：${result.error}`;
+        errorEl.hidden = false;
+        return;
+      }
+      cleanup();
+      renderHeaderIdentity();
+      if (onIdentityChange) onIdentityChange();
+      showToast('資訊已更新。');
+      resolve(true);
+    }
+
+    cancelBtn.addEventListener('click', onCancel);
+    submitBtn.addEventListener('click', onSubmit);
   });
 }
