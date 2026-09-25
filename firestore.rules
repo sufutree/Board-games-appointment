@@ -53,8 +53,24 @@ service cloud.firestore {
     }
 
     // 幫某個場地新增遊戲的提議：任何人都能送，但套用到 collections 要 admin
-    // 審核（api/adminReviewVenueCollection.js），不是自己名下的東西不能直寫。
+    // 審核（api/admin.js 的 reviewVenueCollection），不是自己名下的東西不能直寫。
     match /venue_collection_requests/{requestId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.submitted_by == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow update, delete: if false;
+    }
+
+    // tags：遊戲標籤清單，只能透過 admin.js 的 Admin SDK 新增/刪除。
+    match /tags/{tagCode} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 提議新標籤：任何人都能送，通過才會真的變成正式標籤選項
+    // （api/admin.js 的 reviewTagProposal）。
+    match /tag_proposals/{proposalId} {
       allow read: if true;
       allow create: if request.auth != null
         && request.resource.data.submitted_by == request.auth.uid

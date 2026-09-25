@@ -60,7 +60,7 @@ export async function getIdToken() {
   return auth.currentUser.getIdToken();
 }
 
-const BOOTSTRAP_COLLECTIONS = ['members', 'venues', 'collections', 'games', 'events', 'slots', 'votes', 'signups'];
+const BOOTSTRAP_COLLECTIONS = ['members', 'venues', 'collections', 'games', 'events', 'slots', 'votes', 'signups', 'tags'];
 
 export async function firestoreBootstrap() {
   const snapshots = await Promise.all(

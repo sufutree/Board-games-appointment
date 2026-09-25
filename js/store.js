@@ -6,14 +6,15 @@ export const store = {
   loaded: false,
   loadError: null,
 
-  games: {},            // bgg_id(string) -> 遊戲後設資料，來自 Sheets games 分頁
+  games: {},            // bgg_id(string) -> 遊戲後設資料
   members: [],
   venues: [],
-  sheetCollections: [],  // Sheets collections 分頁：所有持有者的收藏（含 Sufu）
+  sheetCollections: [],  // 所有持有者（成員或場地）的收藏
   events: [],
   slots: [],
   votes: [],
   signups: [],
+  tags: [],             // 可複選的遊戲標籤清單，見 admin 後台的標籤管理
 };
 
 let listeners = [];
@@ -36,6 +37,7 @@ export async function loadAll() {
     store.slots = boot.slots || [];
     store.votes = boot.votes || [];
     store.signups = boot.signups || [];
+    store.tags = boot.tags || [];
     store.loaded = true;
   } catch (err) {
     store.loadError = err.message || 'LOAD_FAILED';
@@ -56,6 +58,7 @@ export async function reloadDynamic() {
   store.slots = boot.slots || [];
   store.votes = boot.votes || [];
   store.signups = boot.signups || [];
+  store.tags = boot.tags || [];
   notify();
 }
 
@@ -153,7 +156,7 @@ function normalizeGameRow(row) {
     max_playtime: numOrNull(row.max_playtime),
     weight: numOrNull(row.weight),
     year: numOrNull(row.year),
-    category: strOrNull(row.category),
+    tags: Array.isArray(row.tags) ? row.tags : [],
     is_expansion: isTrue(row.is_expansion),
     parent_bgg_id: numOrNull(row.parent_bgg_id),
   };
@@ -184,7 +187,7 @@ export function getGameMeta(bggId, fallbackNameZh) {
     max_playtime: null,
     weight: null,
     year: null,
-    category: null,
+    tags: [],
     is_expansion: false,
     parent_bgg_id: null,
     hasData: false,
@@ -193,4 +196,26 @@ export function getGameMeta(bggId, fallbackNameZh) {
 
 function isTrue(v) {
   return v === true || v === 'TRUE' || v === 'true' || v === 1;
+}
+
+// ---- 標籤 helper（取代原本單選的 category） ----
+
+export function activeTags() {
+  return store.tags.filter((t) => isTrue(t.active));
+}
+
+export function tagLabel(code) {
+  const t = store.tags.find((tag) => tag.code === code);
+  return t ? t.label : code;
+}
+
+// 依 group_code 分組，picker／篩選介面用。沒有對應群組的標籤歸進「其他」。
+export function tagGroups() {
+  const groups = new Map();
+  activeTags().forEach((t) => {
+    const key = t.group_code || 'other';
+    if (!groups.has(key)) groups.set(key, { code: key, label: t.group_label || '其他', items: [] });
+    groups.get(key).items.push(t);
+  });
+  return [...groups.values()];
 }

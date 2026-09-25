@@ -29,6 +29,9 @@ export default async function handler(req, res) {
   if (op === 'deleteVenue') return deleteVenue(req, res);
   if (op === 'reviewCorrection') return reviewCorrection(req, res);
   if (op === 'reviewVenueCollection') return reviewVenueCollection(req, res);
+  if (op === 'addTag') return addTag(req, res);
+  if (op === 'deleteTag') return deleteTag(req, res);
+  if (op === 'reviewTagProposal') return reviewTagProposal(req, res);
 
   return res.status(400).json({ ok: false, error: 'UNKNOWN_OP' });
 }
@@ -116,7 +119,11 @@ async function reviewCorrection(req, res) {
   const correction = snap.data();
 
   if (action === 'approve') {
-    if (correction.field !== 'other') {
+    if (correction.field === 'tags') {
+      let tags = [];
+      try { tags = JSON.parse(correction.suggested_value); } catch { tags = []; }
+      await db.collection('games').doc(String(correction.bgg_id)).set({ tags }, { merge: true });
+    } else if (correction.field !== 'other') {
       const value = normalizeCorrectionValue(correction.field, correction.suggested_value);
       await db.collection('games').doc(String(correction.bgg_id)).set({ [correction.field]: value }, { merge: true });
     }
@@ -145,6 +152,67 @@ async function reviewVenueCollection(req, res) {
     await db.collection('collections').doc(`${reqData.venue_id}_${reqData.bgg_id}`).set({
       holder_id: reqData.venue_id, bgg_id: reqData.bgg_id, name_zh: reqData.name_zh || '', note: '',
     });
+    await ref.update({ status: 'approved', reviewed_at: new Date().toISOString() });
+  } else if (action === 'reject') {
+    await ref.update({ status: 'rejected', reviewed_at: new Date().toISOString() });
+  } else {
+    return res.status(400).json({ ok: false, error: 'BAD_ACTION' });
+  }
+
+  return res.status(200).json({ ok: true });
+}
+
+// 直接新增一個標籤選項。code 就用 label 本身（跟成員/地點用名稱當 id 一致）。
+async function addTag(req, res) {
+  const { label, group_code, group_label } = req.body || {};
+  const code = String(label || '').trim();
+  if (!code) return res.status(400).json({ ok: false, error: 'MISSING_LABEL' });
+
+  const existing = await db.collection('tags').doc(code).get();
+  if (existing.exists) return res.status(409).json({ ok: false, error: 'ALREADY_EXISTS' });
+
+  await db.collection('tags').doc(code).set({
+    code, label: code, group_code: group_code || 'other', group_label: group_label || '其他', active: true,
+  });
+
+  return res.status(200).json({ ok: true });
+}
+
+// 刪除標籤選項。已經標在某些遊戲上的不會被清掉，只是清單裡不會再出現，
+// 跟刪除成員/地點是同一種「歷史資料不動」的取捨。
+async function deleteTag(req, res) {
+  const { tag_code } = req.body || {};
+  if (!tag_code) return res.status(400).json({ ok: false, error: 'MISSING_TAG_CODE' });
+
+  await db.collection('tags').doc(String(tag_code)).delete();
+
+  return res.status(200).json({ ok: true });
+}
+
+// 審核使用者提議的新標籤。通過就正式建立這個標籤，如果提議時有指定要
+// 順便標在哪款遊戲上，一併把那款遊戲的 tags 加上去。
+async function reviewTagProposal(req, res) {
+  const { proposal_id, action } = req.body || {};
+  if (!proposal_id) return res.status(400).json({ ok: false, error: 'MISSING_PROPOSAL_ID' });
+
+  const ref = db.collection('tag_proposals').doc(String(proposal_id));
+  const snap = await ref.get();
+  if (!snap.exists) return res.status(404).json({ ok: false, error: 'NOT_FOUND' });
+  const proposal = snap.data();
+
+  if (action === 'approve') {
+    const code = String(proposal.label || '').trim();
+    await db.collection('tags').doc(code).set({
+      code, label: code, group_code: proposal.group_code || 'other', group_label: proposal.group_label || '其他', active: true,
+    });
+    if (proposal.apply_to_bgg_id) {
+      const gameRef = db.collection('games').doc(String(proposal.apply_to_bgg_id));
+      const gameSnap = await gameRef.get();
+      const currentTags = (gameSnap.exists && gameSnap.data().tags) || [];
+      if (!currentTags.includes(code)) {
+        await gameRef.set({ tags: [...currentTags, code] }, { merge: true });
+      }
+    }
     await ref.update({ status: 'approved', reviewed_at: new Date().toISOString() });
   } else if (action === 'reject') {
     await ref.update({ status: 'rejected', reviewed_at: new Date().toISOString() });

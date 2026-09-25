@@ -211,7 +211,7 @@ async function addGame(req, res, uid) {
     max_playtime: bggData.max_playtime ?? existing.max_playtime ?? null,
     weight: bggData.weight ?? existing.weight ?? null,
     year: bggData.year ?? existing.year ?? null,
-    category: existing.category ?? null,
+    tags: Array.isArray(existing.tags) ? existing.tags : [],
     is_expansion: bggData.is_expansion ?? existing.is_expansion ?? false,
     parent_bgg_id: bggData.parent_bgg_id ?? existing.parent_bgg_id ?? null,
   };

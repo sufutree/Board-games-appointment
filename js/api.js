@@ -98,6 +98,7 @@ export async function writeAction(action, payload, requiredMemberId, memberLabel
   if (action === 'toggleCollection') return doToggleCollection(payload);
   if (action === 'submitCorrection') return doSubmitCorrection(payload, requiredMemberId, memberLabel);
   if (action === 'submitVenueCollection') return doSubmitVenueCollection(payload, requiredMemberId, memberLabel);
+  if (action === 'submitTagProposal') return doSubmitTagProposal(payload, requiredMemberId, memberLabel);
   return callApi(action, payload);
 }
 
@@ -141,6 +142,24 @@ async function doSubmitVenueCollection(payload, submittedBy, submittedByName) {
     const ref = doc(collection(db, 'venue_collection_requests'));
     await setDoc(ref, {
       venue_id, bgg_id, name_zh: name_zh || '',
+      submitted_by: submittedBy, submitted_by_name: submittedByName || submittedBy,
+      submitted_at: new Date().toISOString(), status: 'pending',
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.code || 'FIRESTORE_ERROR' };
+  }
+}
+
+// 提議一個全新的標籤，送給 admin 審核，通過才會正式變成標籤選項；如果有
+// 指定 apply_to_bgg_id，通過時會順便把這個標籤加到那款遊戲上。
+async function doSubmitTagProposal(payload, submittedBy, submittedByName) {
+  const { label, group_code, group_label, apply_to_bgg_id } = payload;
+  try {
+    const ref = doc(collection(db, 'tag_proposals'));
+    await setDoc(ref, {
+      label, group_code: group_code || 'other', group_label: group_label || '其他',
+      apply_to_bgg_id: apply_to_bgg_id ?? null,
       submitted_by: submittedBy, submitted_by_name: submittedByName || submittedBy,
       submitted_at: new Date().toISOString(), status: 'pending',
     });

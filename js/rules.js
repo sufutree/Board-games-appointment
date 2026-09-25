@@ -43,7 +43,7 @@ export function computePlayableList(event) {
 }
 
 // 篩選：查無 BGG 資料的遊戲不受人數／時長／複雜度篩選排除。
-export function filterGames(list, { playerCount, maxDuration, weightMin, weightMax, keyword, category, holderId } = {}) {
+export function filterGames(list, { playerCount, maxDuration, weightMin, weightMax, keyword, tag, holderId } = {}) {
   const kw = (keyword || '').trim().toLowerCase();
   return list.filter((item) => {
     const meta = item.meta;
@@ -53,7 +53,7 @@ export function filterGames(list, { playerCount, maxDuration, weightMin, weightM
       if (!hay.includes(kw)) return false;
     }
 
-    if (category && meta.category !== category) return false;
+    if (tag && !(meta.tags || []).includes(tag)) return false;
 
     if (holderId && !item.sources.some((s) => s.holderId === holderId)) return false;
 
@@ -162,57 +162,9 @@ export function formatSlotLabel(dateStr, period) {
   return `${m}/${day}（${wd}）${PERIOD_LABELS[period] || period}`;
 }
 
-export const CATEGORY_GROUPS = [
-  {
-    code: 'S',
-    label: '策略',
-    items: [
-      { code: 'S-WP', label: '工擺' },
-      { code: 'S-DC', label: '牌組引擎建構' },
-      { code: 'S-TR', label: '旅行區域控制' },
-      { code: 'S-4X', label: '4X或戰鬥' },
-      { code: 'S-EC', label: '經貿競標' },
-      { code: 'S-AC', label: '行動選擇' },
-    ],
-  },
-  {
-    code: 'P',
-    label: '派對',
-    items: [
-      { code: 'P-CS', label: '陣營心機' },
-      { code: 'P-C', label: '卡牌' },
-      { code: 'P-H', label: '技巧' },
-      { code: 'P-CR', label: '創意' },
-    ],
-  },
-  {
-    code: 'F',
-    label: '家庭',
-    items: [
-      { code: 'F-T', label: '雙人' },
-      { code: 'F-C', label: '卡牌' },
-      { code: 'F-S', label: '輕策略' },
-      { code: 'F-TL', label: '板塊拼放' },
-      { code: 'F-A', label: '抽象' },
-      { code: 'F-D', label: '骰子' },
-    ],
-  },
-  {
-    code: 'C',
-    label: '兒童',
-    items: [
-      { code: 'C-R', label: '反應' },
-      { code: 'C-H', label: '巧手' },
-      { code: 'C-M', label: '記憶' },
-      { code: 'C-S', label: '兒童策略' },
-    ],
-  },
-];
-
-export const CATEGORY_LABELS = CATEGORY_GROUPS.reduce((acc, group) => {
-  for (const item of group.items) acc[item.code] = `${group.label}｜${item.label}`;
-  return acc;
-}, {});
+// 分類已經改成可複選的標籤，活的清單存在 Firestore 的 tags 集合（見
+// admin 後台的標籤管理），不再是這裡的寫死常數。要拿標籤清單／分組請用
+// store.js 的 activeTags() / tagGroups() / tagLabel()。
 
 export function formatPlayers(meta) {
   if (meta.min_players == null && meta.max_players == null) return '－';

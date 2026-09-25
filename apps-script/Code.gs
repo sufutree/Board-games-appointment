@@ -98,6 +98,7 @@ function toFirestoreValue(v) {
   if (typeof v === 'number') {
     return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
   }
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(toFirestoreValue) } };
   return { stringValue: String(v) };
 }
 
@@ -133,6 +134,102 @@ function migratePasswordsToFirestore() {
     firestoreSet('member_secrets', m.id, { password: m.password != null ? String(m.password) : '' });
   });
   Logger.log('密碼搬遷完成，共 ' + rows.length + ' 筆。');
+}
+
+// ---- 分類 → 標籤（多選）搬遷 ------------------------------------------------
+
+// 跟 js/rules.js 的 CATEGORY_GROUPS 內容一致，這裡是唯一一次性寫進 Firestore
+// tags 集合的地方，之後 tags 就是 Firestore 說了算，這份常數不會再被讀。
+const LEGACY_CATEGORY_GROUPS = [
+  { code: 'S', label: '策略', items: [
+    { code: 'S-WP', label: '工擺' }, { code: 'S-DC', label: '牌組引擎建構' },
+    { code: 'S-TR', label: '旅行區域控制' }, { code: 'S-4X', label: '4X或戰鬥' },
+    { code: 'S-EC', label: '經貿競標' }, { code: 'S-AC', label: '行動選擇' },
+  ] },
+  { code: 'P', label: '派對', items: [
+    { code: 'P-CS', label: '陣營心機' }, { code: 'P-C', label: '卡牌' },
+    { code: 'P-H', label: '技巧' }, { code: 'P-CR', label: '創意' },
+  ] },
+  { code: 'F', label: '家庭', items: [
+    { code: 'F-T', label: '雙人' }, { code: 'F-C', label: '卡牌' },
+    { code: 'F-S', label: '輕策略' }, { code: 'F-TL', label: '板塊拼放' },
+    { code: 'F-A', label: '抽象' }, { code: 'F-D', label: '骰子' },
+  ] },
+  { code: 'C', label: '兒童', items: [
+    { code: 'C-R', label: '反應' }, { code: 'C-H', label: '巧手' },
+    { code: 'C-M', label: '記憶' }, { code: 'C-S', label: '兒童策略' },
+  ] },
+];
+
+// Firestore REST 回傳的 fields 是型別包裝過的值，讀回來要轉正常 JS 值。
+function fromFirestoreValue(v) {
+  if (!v) return null;
+  if ('stringValue' in v) return v.stringValue;
+  if ('integerValue' in v) return Number(v.integerValue);
+  if ('doubleValue' in v) return v.doubleValue;
+  if ('booleanValue' in v) return v.booleanValue;
+  if ('nullValue' in v) return null;
+  if ('arrayValue' in v) return (v.arrayValue.values || []).map(fromFirestoreValue);
+  return null;
+}
+
+function fromFirestoreFields(fields) {
+  const obj = {};
+  Object.keys(fields || {}).forEach((k) => { obj[k] = fromFirestoreValue(fields[k]); });
+  return obj;
+}
+
+// 分頁讀出一個 collection 全部文件，回傳 { docId, ...fields } 的陣列。
+function firestoreGetAll(collectionName) {
+  const results = [];
+  let pageToken = null;
+  do {
+    let url = 'https://firestore.googleapis.com/v1/projects/' + FIRESTORE_PROJECT_ID +
+      '/databases/(default)/documents/' + collectionName + '?pageSize=300';
+    if (pageToken) url += '&pageToken=' + encodeURIComponent(pageToken);
+    const res = UrlFetchApp.fetch(url, {
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      muteHttpExceptions: true,
+    });
+    const data = JSON.parse(res.getContentText());
+    (data.documents || []).forEach((doc) => {
+      const parts = doc.name.split('/');
+      const docId = parts[parts.length - 1];
+      results.push(Object.assign({ _id: docId }, fromFirestoreFields(doc.fields)));
+    });
+    pageToken = data.nextPageToken || null;
+  } while (pageToken);
+  return results;
+}
+
+// 一次性：把現有分類清單（LEGACY_CATEGORY_GROUPS）灌進 Firestore 的 tags
+// 集合，當作可複選標籤的初始清單。之後新增/刪除標籤都在 admin 後台做，
+// 不會再跑這支。
+function seedTagsToFirestore() {
+  if (!firestoreEnabled()) throw new Error('先設定 FIRESTORE_PROJECT_ID。');
+  LEGACY_CATEGORY_GROUPS.forEach((group) => {
+    group.items.forEach((item) => {
+      firestoreSet('tags', item.code, {
+        code: item.code, label: item.label, group_code: group.code, group_label: group.label, active: true,
+      });
+    });
+  });
+  Logger.log('標籤清單匯入完成。');
+}
+
+// 一次性：把 games 的單一 category 欄位換成 tags 陣列（一個值搬進去，之後
+// 使用者/admin 可以再增減）。直接讀 Firestore 現有的 games（不是讀 Sheets），
+// 因為新增遊戲功能上線後 Firestore 的 games 已經比 Sheets 新。
+function migrateGameCategoryToTags() {
+  if (!firestoreEnabled()) throw new Error('先設定 FIRESTORE_PROJECT_ID。');
+  const games = firestoreGetAll('games');
+  games.forEach((g) => {
+    const tags = g.category ? [g.category] : [];
+    const row = Object.assign({}, g, { tags: tags });
+    delete row._id;
+    firestoreSet('games', String(g.bgg_id), row);
+  });
+  Logger.log('games.tags 搬遷完成，共 ' + games.length + ' 筆。');
 }
 // --- Firestore POC end ------------------------------------------------------
 

@@ -2,9 +2,8 @@
 // 直接編輯 Sheets members 分頁的做法。只認主密碼，跟一般使用者的 Firebase
 // 登入身分無關，所以不放進主導覽列，知道網址（#/admin）的人才會用到。
 import { collection, query, where, getDocs } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
-import { activeMembers, activeVenues, reloadDynamic, getGameMeta } from '../store.js';
+import { activeMembers, activeVenues, reloadDynamic, getGameMeta, tagGroups, tagLabel } from '../store.js';
 import { db } from '../firebase.js';
-import { CATEGORY_LABELS } from '../rules.js';
 import { escapeHtml, showToast } from '../app.js';
 
 const ADMIN_ERROR_LABELS = {
@@ -16,12 +15,19 @@ const ADMIN_ERROR_LABELS = {
 };
 
 const CORRECTION_FIELD_LABELS = {
-  name_zh: '中文名稱', category: '分類', min_players: '最少人數',
+  name_zh: '中文名稱', tags: '標籤', min_players: '最少人數',
   max_players: '最多人數', playing_time: '遊玩時間（分鐘）', is_expansion: '是否為擴充', other: '其他',
 };
 
 function correctionValueLabel(field, value) {
-  if (field === 'category') return CATEGORY_LABELS[value] || value;
+  if (field === 'tags') {
+    try {
+      const codes = JSON.parse(value);
+      return codes.length ? codes.map(tagLabel).join('、') : '（無）';
+    } catch {
+      return value;
+    }
+  }
   if (field === 'is_expansion') return value === 'true' || value === true ? '是' : '否';
   return value;
 }
@@ -48,12 +54,15 @@ function saveMaster(value) {
 export async function renderAdmin(appEl) {
   const members = activeMembers();
   const venues = activeVenues();
-  const [correctionsSnap, venueReqSnap] = await Promise.all([
+  const [correctionsSnap, venueReqSnap, tagReqSnap] = await Promise.all([
     getDocs(query(collection(db, 'game_corrections'), where('status', '==', 'pending'))),
     getDocs(query(collection(db, 'venue_collection_requests'), where('status', '==', 'pending'))),
+    getDocs(query(collection(db, 'tag_proposals'), where('status', '==', 'pending'))),
   ]);
   const pendingCorrections = correctionsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
   const pendingVenueRequests = venueReqSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const pendingTagProposals = tagReqSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const tagGroupList = tagGroups();
 
   appEl.innerHTML = `
     <h1 class="page-title">管理</h1>
@@ -101,6 +110,49 @@ export async function renderAdmin(appEl) {
           </div>
         `;
       }).join('')}
+    </div>
+
+    <div class="card">
+      <div class="section-title">待審核的新標籤提議（${pendingTagProposals.length}）</div>
+      ${pendingTagProposals.length === 0 ? '<p class="card-meta">目前沒有待審核的項目。</p>' : pendingTagProposals.map((p) => {
+        const applyMeta = p.apply_to_bgg_id ? getGameMeta(p.apply_to_bgg_id) : null;
+        return `
+          <div class="card" style="margin-bottom:8px;">
+            <div class="card-meta">新標籤：${escapeHtml(p.label)}（${escapeHtml(p.group_label || '其他')}）</div>
+            ${applyMeta ? `<div class="card-meta">通過後順便標在：${escapeHtml(applyMeta.name_zh || applyMeta.name_en || String(p.apply_to_bgg_id))}</div>` : ''}
+            <div class="card-meta">提議人：${escapeHtml(p.submitted_by_name || p.submitted_by)}</div>
+            <div style="display:flex; gap:8px; margin-top:8px;">
+              <button type="button" class="btn btn-sm btn-primary" data-tagreq-id="${escapeHtml(p.id)}" data-tagreq-action="approve">通過</button>
+              <button type="button" class="btn btn-sm btn-ghost" data-tagreq-id="${escapeHtml(p.id)}" data-tagreq-action="reject">駁回</button>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+
+    <div class="card">
+      <div class="section-title">標籤管理</div>
+      ${tagGroupList.map((g) => `
+        <div class="card-meta" style="margin-bottom:4px;"><strong>${escapeHtml(g.label)}</strong></div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;">
+          ${g.items.map((t) => `
+            <span class="source-tag">${escapeHtml(t.label)} <button type="button" class="btn-ghost" data-delete-tag="${escapeHtml(t.code)}" style="border:none; background:none; cursor:pointer; padding:0 0 0 4px;" title="刪除標籤">✕</button></span>
+          `).join('')}
+        </div>
+      `).join('')}
+      <div class="form-group">
+        <label class="form-label" for="new-tag-label">新增標籤名稱</label>
+        <input class="form-control" id="new-tag-label">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="new-tag-group-select">分組</label>
+        <select class="form-control" id="new-tag-group-select">
+          ${tagGroupList.map((g) => `<option value="${escapeHtml(g.code)}" data-label="${escapeHtml(g.label)}">${escapeHtml(g.label)}</option>`).join('')}
+          <option value="other" data-label="其他">其他</option>
+        </select>
+      </div>
+      <p id="add-tag-error" class="error-text" hidden></p>
+      <button type="button" id="add-tag-btn" class="btn btn-primary btn-sm">新增</button>
     </div>
 
     <div class="card">
@@ -247,6 +299,106 @@ export async function renderAdmin(appEl) {
       showToast(btn.dataset.venuereqAction === 'approve' ? '已通過並登記進場地收藏。' : '已駁回。');
       renderAdmin(appEl);
     });
+  });
+
+  document.querySelectorAll('button[data-tagreq-id]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      let data;
+      try {
+        const res = await fetch('/api/admin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            master_password: masterInput.value,
+            op: 'reviewTagProposal',
+            proposal_id: btn.dataset.tagreqId,
+            action: btn.dataset.tagreqAction,
+          }),
+        });
+        data = await res.json();
+      } catch {
+        data = { ok: false, error: 'NETWORK_ERROR' };
+      }
+      if (!data.ok) {
+        btn.disabled = false;
+        showToast(ADMIN_ERROR_LABELS[data.error] || `處理失敗：${data.error}`);
+        return;
+      }
+      await reloadDynamic();
+      showToast(btn.dataset.tagreqAction === 'approve' ? '已通過，標籤已建立。' : '已駁回。');
+      renderAdmin(appEl);
+    });
+  });
+
+  document.querySelectorAll('button[data-delete-tag]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const tagCode = btn.dataset.deleteTag;
+      if (!confirm(`確定要刪除標籤「${tagLabel(tagCode)}」嗎？`)) return;
+      btn.disabled = true;
+      let data;
+      try {
+        const res = await fetch('/api/admin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ master_password: masterInput.value, op: 'deleteTag', tag_code: tagCode }),
+        });
+        data = await res.json();
+      } catch {
+        data = { ok: false, error: 'NETWORK_ERROR' };
+      }
+      if (!data.ok) {
+        btn.disabled = false;
+        showToast(ADMIN_ERROR_LABELS[data.error] || `刪除失敗：${data.error}`);
+        return;
+      }
+      await reloadDynamic();
+      showToast('已刪除標籤。');
+      renderAdmin(appEl);
+    });
+  });
+
+  document.getElementById('add-tag-btn').addEventListener('click', async () => {
+    const errorEl = document.getElementById('add-tag-error');
+    errorEl.hidden = true;
+    const label = document.getElementById('new-tag-label').value.trim();
+    if (!label) {
+      errorEl.textContent = '請輸入標籤名稱。';
+      errorEl.hidden = false;
+      return;
+    }
+    const groupSelect = document.getElementById('new-tag-group-select');
+
+    const btn = document.getElementById('add-tag-btn');
+    btn.disabled = true;
+    btn.textContent = '處理中…';
+    let data;
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          master_password: masterInput.value,
+          op: 'addTag',
+          label,
+          group_code: groupSelect.value,
+          group_label: groupSelect.selectedOptions[0].dataset.label,
+        }),
+      });
+      data = await res.json();
+    } catch {
+      data = { ok: false, error: 'NETWORK_ERROR' };
+    }
+    btn.disabled = false;
+    btn.textContent = '新增';
+    if (!data.ok) {
+      errorEl.textContent = data.error === 'ALREADY_EXISTS' ? '已經有同名標籤了。' : (ADMIN_ERROR_LABELS[data.error] || `新增失敗：${data.error}`);
+      errorEl.hidden = false;
+      return;
+    }
+    await reloadDynamic();
+    showToast(`已新增標籤「${label}」。`);
+    renderAdmin(appEl);
   });
 
   document.getElementById('add-venue-btn').addEventListener('click', async () => {

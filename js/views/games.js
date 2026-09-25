@@ -1,6 +1,9 @@
-import { activeHolders, activeMembers, activeVenues, reloadDynamic, allOwnerships } from '../store.js';
 import {
-  allGamesWithHolders, ownersOf, CATEGORY_GROUPS, CATEGORY_LABELS,
+  activeHolders, activeMembers, activeVenues, reloadDynamic, allOwnerships,
+  activeTags, tagGroups, tagLabel,
+} from '../store.js';
+import {
+  allGamesWithHolders, ownersOf,
   filterGames, formatPlayers, formatDuration, formatWeight,
 } from '../rules.js';
 import { writeAction, getSelfId } from '../api.js';
@@ -18,7 +21,7 @@ const BGG_ERROR_LABELS = {
 
 const CORRECTION_FIELDS = {
   name_zh: '中文名稱',
-  category: '分類',
+  tags: '標籤',
   min_players: '最少人數',
   max_players: '最多人數',
   playing_time: '遊玩時間（分鐘）',
@@ -54,9 +57,9 @@ export async function renderGames(appEl) {
       </select>
     </div>
     <div class="filter-bar">
-      <select class="form-control" id="g-category">
-        <option value="">全部分類</option>
-        ${CATEGORY_GROUPS.map((g) => `
+      <select class="form-control" id="g-tag">
+        <option value="">全部標籤</option>
+        ${tagGroups().map((g) => `
           <optgroup label="${escapeHtml(g.label)}">
             ${g.items.map((it) => `<option value="${it.code}">${escapeHtml(it.label)}</option>`).join('')}
           </optgroup>
@@ -89,7 +92,7 @@ export async function renderGames(appEl) {
 
   const keywordInput = document.getElementById('g-keyword');
   const holderSelect = document.getElementById('g-holder');
-  const categorySelect = document.getElementById('g-category');
+  const tagSelect = document.getElementById('g-tag');
   const playersInput = document.getElementById('g-players');
   const durationSelect = document.getElementById('g-duration');
   const weightSelect = document.getElementById('g-weight');
@@ -110,7 +113,7 @@ export async function renderGames(appEl) {
     const filtered = filterGames(nonExpansions, {
       keyword: keywordInput.value,
       holderId: holderSelect.value || null,
-      category: categorySelect.value || null,
+      tag: tagSelect.value || null,
       playerCount: playersInput.value,
       maxDuration: durationSelect.value,
       weightMin,
@@ -132,6 +135,7 @@ export async function renderGames(appEl) {
           <div class="game-card-meta">${formatPlayers(item.meta)} ・ ${formatDuration(item.meta)}</div>
           <div>
             ${item.sources.map((s) => `<span class="source-tag">${escapeHtml(s.label)}</span>`).join('')}
+            ${(item.meta.tags || []).map((t) => `<span class="source-tag">${escapeHtml(tagLabel(t))}</span>`).join('')}
             ${!item.meta.hasData ? '<span class="source-tag missing-tag">缺少遊戲資料</span>' : ''}
           </div>
         </div>
@@ -178,7 +182,7 @@ export async function renderGames(appEl) {
           <dt>人數</dt><dd>${formatPlayers(meta)}</dd>
           <dt>時長</dt><dd>${formatDuration(meta)}</dd>
           <dt>複雜度</dt><dd>${formatWeight(meta)}</dd>
-          <dt>分類</dt><dd>${meta.category ? escapeHtml(CATEGORY_LABELS[meta.category] || meta.category) : '－'}</dd>
+          <dt>標籤</dt><dd>${(meta.tags || []).length ? meta.tags.map((t) => escapeHtml(tagLabel(t))).join('、') : '－'}</dd>
           <dt>在哪裡／誰手上</dt>
           <dd>${owners.length === 0 ? '目前沒有人登記持有。' : owners.map((o) => o.isVenue ? `📍${escapeHtml(o.name)}` : escapeHtml(o.name)).join('、')}</dd>
         </dl>
@@ -225,7 +229,7 @@ export async function renderGames(appEl) {
     });
   }
 
-  [keywordInput, holderSelect, categorySelect, playersInput, durationSelect, weightSelect].forEach((el) => {
+  [keywordInput, holderSelect, tagSelect, playersInput, durationSelect, weightSelect].forEach((el) => {
     el.addEventListener('input', renderGrid);
     el.addEventListener('change', renderGrid);
   });
@@ -322,7 +326,6 @@ export async function renderGames(appEl) {
 
     function currentValueFor(field) {
       if (field === 'name_zh') return meta.name_zh || '';
-      if (field === 'category') return meta.category ? (CATEGORY_LABELS[meta.category] || meta.category) : '';
       if (field === 'min_players') return meta.min_players ?? '';
       if (field === 'max_players') return meta.max_players ?? '';
       if (field === 'playing_time') return meta.playing_time ?? '';
@@ -351,22 +354,37 @@ export async function renderGames(appEl) {
       const fieldSelect = document.getElementById('correction-field');
       const currentEl = document.getElementById('correction-current');
       const valueGroup = document.getElementById('correction-value-group');
+      const currentTagCodes = meta.tags || [];
 
       function renderValueInput() {
         const field = fieldSelect.value;
-        currentEl.textContent = field === 'other' ? '' : `目前的值：${currentValueFor(field) || '（空）'}`;
-        if (field === 'category') {
+        if (field === 'tags') {
+          currentEl.textContent = `目前的標籤：${currentTagCodes.length ? currentTagCodes.map(tagLabel).join('、') : '（無）'}`;
           valueGroup.innerHTML = `
-            <label class="form-label" for="correction-value">建議改成</label>
-            <select class="form-control" id="correction-value">
-              ${CATEGORY_GROUPS.map((g) => `
-                <optgroup label="${escapeHtml(g.label)}">
-                  ${g.items.map((it) => `<option value="${it.code}">${escapeHtml(it.label)}</option>`).join('')}
-                </optgroup>
-              `).join('')}
+            <label class="form-label">勾選這款遊戲該有的標籤</label>
+            ${tagGroups().map((g) => `
+              <div style="margin-bottom:6px;">
+                <strong>${escapeHtml(g.label)}</strong><br>
+                ${g.items.map((t) => `
+                  <label style="display:inline-flex; align-items:center; gap:4px; margin-right:12px;">
+                    <input type="checkbox" class="tag-checkbox" value="${escapeHtml(t.code)}" ${currentTagCodes.includes(t.code) ? 'checked' : ''}>
+                    ${escapeHtml(t.label)}
+                  </label>
+                `).join('')}
+              </div>
+            `).join('')}
+            <p class="form-hint">清單裡沒有你要的標籤？下面填一個新的（送出後這次勾選的既有標籤會先忽略，等新標籤通過再回來調整）。</p>
+            <label class="form-label" for="new-tag-name">提議新標籤（選填）</label>
+            <input class="form-control" id="new-tag-name" placeholder="新標籤名稱">
+            <select class="form-control" id="new-tag-group" style="margin-top:8px;">
+              ${tagGroups().map((g) => `<option value="${g.code}" data-label="${escapeHtml(g.label)}">${escapeHtml(g.label)}</option>`).join('')}
+              <option value="other" data-label="其他">其他</option>
             </select>
           `;
-        } else if (field === 'is_expansion') {
+          return;
+        }
+        currentEl.textContent = field === 'other' ? '' : `目前的值：${currentValueFor(field) || '（空）'}`;
+        if (field === 'is_expansion') {
           valueGroup.innerHTML = `
             <label class="form-label" for="correction-value">建議改成</label>
             <select class="form-control" id="correction-value">
@@ -396,9 +414,56 @@ export async function renderGames(appEl) {
         errorEl.hidden = true;
         const field = fieldSelect.value;
         const note = document.getElementById('correction-note').value.trim();
+
+        const selfId = getSelfId();
+        if (!selfId) {
+          errorEl.textContent = BGG_ERROR_LABELS.MISSING_MEMBER_ID;
+          errorEl.hidden = false;
+          return;
+        }
+        const member = activeMembers().find((m) => m.id === selfId);
+        const submitBtn = document.getElementById('correction-submit');
+
+        if (field === 'tags') {
+          const newTagName = document.getElementById('new-tag-name').value.trim();
+          submitBtn.disabled = true;
+          submitBtn.textContent = '送出中…';
+          let result;
+          if (newTagName) {
+            const groupSelect = document.getElementById('new-tag-group');
+            result = await writeAction('submitTagProposal', {
+              label: newTagName,
+              group_code: groupSelect.value,
+              group_label: groupSelect.selectedOptions[0].dataset.label,
+              apply_to_bgg_id: item.bggId,
+            }, selfId, member ? member.name : selfId);
+          } else {
+            const checkedCodes = [...document.querySelectorAll('.tag-checkbox:checked')].map((el) => el.value);
+            result = await writeAction('submitCorrection', {
+              bgg_id: item.bggId,
+              field: 'tags',
+              current_value: JSON.stringify(currentTagCodes),
+              suggested_value: JSON.stringify(checkedCodes),
+              note,
+            }, selfId, member ? member.name : selfId);
+          }
+          submitBtn.disabled = false;
+          submitBtn.textContent = '送出給管理員審核';
+          if (!result.ok) {
+            if (result.error !== 'CANCELLED') {
+              errorEl.textContent = `送出失敗：${result.error}`;
+              errorEl.hidden = false;
+            }
+            return;
+          }
+          showToast('已送出，等管理員審核。');
+          formEl.hidden = true;
+          toggleBtn.textContent = '回報資料有誤';
+          return;
+        }
+
         const valueInput = document.getElementById('correction-value');
         const suggestedValue = valueInput ? valueInput.value.trim() : '';
-
         if (field !== 'other' && !suggestedValue) {
           errorEl.textContent = '請輸入建議的新值。';
           errorEl.hidden = false;
@@ -410,15 +475,6 @@ export async function renderGames(appEl) {
           return;
         }
 
-        const selfId = getSelfId();
-        if (!selfId) {
-          errorEl.textContent = BGG_ERROR_LABELS.MISSING_MEMBER_ID;
-          errorEl.hidden = false;
-          return;
-        }
-        const member = activeMembers().find((m) => m.id === selfId);
-
-        const submitBtn = document.getElementById('correction-submit');
         submitBtn.disabled = true;
         submitBtn.textContent = '送出中…';
         const result = await writeAction('submitCorrection', {
