@@ -91,3 +91,11 @@ async function boot() {
 
 window.addEventListener('hashchange', router);
 boot();
+
+// 註冊 service worker，讓瀏覽器判定這個網站可以「安裝」（不是只能加捷徑）。
+// 失敗（例如舊瀏覽器不支援）就算了，不影響網站本身能不能用。
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
