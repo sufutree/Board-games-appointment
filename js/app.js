@@ -7,6 +7,7 @@ import { renderNewEvent } from './views/newEvent.js';
 import { renderEvent } from './views/event.js';
 import { renderGames } from './views/games.js';
 import { renderAdmin } from './views/admin.js';
+import { pushSupported, notificationPermission, listenForegroundMessages } from './push.js';
 
 const appEl = document.getElementById('app');
 
@@ -83,6 +84,12 @@ async function boot() {
     // 開啟網站主動問一次「你是誰」，可以直接取消當作先不登入逛逛；
     // 不 await，讓畫面先顯示出來，視窗疊在上面，不擋住瀏覽。
     if (!getSelfId()) openIdentityModal();
+    // 上次已經同意過通知權限的話，重新整理/重新打開 app 要重新接上前景
+    // 訊息監聽（js/push.js 那個 listener 只在還活著的分頁生命週期內有效，
+    // 每次開機都要重掛一次，不是掛一次就永久有效）。
+    if (pushSupported() && notificationPermission() === 'granted') {
+      listenForegroundMessages();
+    }
   } catch (err) {
     console.error(err);
     renderLoadError();
