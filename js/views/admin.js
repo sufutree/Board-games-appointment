@@ -69,6 +69,9 @@ export async function renderAdmin(appEl) {
   const tagGroupList = tagGroups();
   const cancelledCount = store.events.filter((e) => e.status === 'cancelled').length;
   const endedCount = store.events.filter((e) => e.status === 'confirmed' && isEventEnded(e, store.slots)).length;
+  const purgeCandidates = store.events
+    .filter((e) => e.status === 'cancelled' || (e.status === 'confirmed' && isEventEnded(e, store.slots)))
+    .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
 
   appEl.innerHTML = `
     <h1 class="page-title">管理</h1>
@@ -276,11 +279,24 @@ export async function renderAdmin(appEl) {
 
     <div class="card">
       <div class="section-title">清除舊團紀錄</div>
-      <p class="card-meta">已取消：${cancelledCount} 筆／已結束：${endedCount} 筆。這是真的刪除（連同投票、報名紀錄一起），沒辦法復原，測試/雜訊用的團可以在這裡一次清掉。</p>
+      <p class="card-meta">已取消：${cancelledCount} 筆／已結束：${endedCount} 筆。這是真的刪除（連同投票、報名紀錄一起），沒辦法復原，測試/雜訊用的團可以在這裡清掉。</p>
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-        <button type="button" id="purge-cancelled-btn" class="btn btn-danger btn-sm" ${cancelledCount === 0 ? 'disabled' : ''}>清除已取消（${cancelledCount}）</button>
-        <button type="button" id="purge-ended-btn" class="btn btn-danger btn-sm" ${endedCount === 0 ? 'disabled' : ''}>清除已結束（${endedCount}）</button>
+        <button type="button" id="purge-cancelled-btn" class="btn btn-danger btn-sm" ${cancelledCount === 0 ? 'disabled' : ''}>清除全部已取消（${cancelledCount}）</button>
+        <button type="button" id="purge-ended-btn" class="btn btn-danger btn-sm" ${endedCount === 0 ? 'disabled' : ''}>清除全部已結束（${endedCount}）</button>
       </div>
+      ${purgeCandidates.length > 0 ? `
+        <p class="form-hint" style="margin-top:12px;">或是勾選特定幾個團：</p>
+        <div style="max-height:280px; overflow-y:auto; border:1px solid var(--color-border); border-radius:var(--radius); padding:8px;">
+          ${purgeCandidates.map((e) => `
+            <label style="display:flex; align-items:center; gap:8px; padding:4px 0;">
+              <input type="checkbox" class="purge-event-checkbox" value="${escapeHtml(e.event_id)}">
+              <span>${escapeHtml(e.title || '未命名團')}</span>
+              <span class="card-meta">（${e.status === 'cancelled' ? '已取消' : '已結束'}）</span>
+            </label>
+          `).join('')}
+        </div>
+        <button type="button" id="purge-selected-btn" class="btn btn-danger btn-sm" style="margin-top:8px;" disabled>清除勾選的（0）</button>
+      ` : ''}
       <p id="purge-events-error" class="error-text" hidden></p>
     </div>
   `;
@@ -697,38 +713,60 @@ export async function renderAdmin(appEl) {
     });
   }
 
-  function wirePurgeButton(btnId, scope, label) {
+  async function submitPurge(btn, body, restoreLabel) {
+    const errorEl = document.getElementById('purge-events-error');
+    errorEl.hidden = true;
+    btn.disabled = true;
+    btn.textContent = '處理中…';
+    let data;
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ master_password: masterInput.value, op: 'purgeEvents', ...body }),
+      });
+      data = await res.json();
+    } catch {
+      data = { ok: false, error: 'NETWORK_ERROR' };
+    }
+    if (!data.ok) {
+      btn.disabled = false;
+      btn.textContent = restoreLabel;
+      errorEl.textContent = ADMIN_ERROR_LABELS[data.error] || `清除失敗：${data.error}`;
+      errorEl.hidden = false;
+      return;
+    }
+    await reloadDynamic();
+    showToast(`已清除 ${data.deletedEvents} 個團。`);
+    renderAdmin(appEl);
+  }
+
+  function wirePurgeScopeButton(btnId, scope, label) {
     const btn = document.getElementById(btnId);
     if (!btn) return;
-    btn.addEventListener('click', async () => {
-      if (!confirm(`確定要清除${label}的團嗎？連同投票、報名紀錄一起刪除，沒辦法復原。`)) return;
-      const errorEl = document.getElementById('purge-events-error');
-      errorEl.hidden = true;
-      btn.disabled = true;
-      btn.textContent = '處理中…';
-      let data;
-      try {
-        const res = await fetch('/api/admin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ master_password: masterInput.value, op: 'purgeEvents', scope }),
-        });
-        data = await res.json();
-      } catch {
-        data = { ok: false, error: 'NETWORK_ERROR' };
-      }
-      if (!data.ok) {
-        btn.disabled = false;
-        btn.textContent = `清除${label}`;
-        errorEl.textContent = ADMIN_ERROR_LABELS[data.error] || `清除失敗：${data.error}`;
-        errorEl.hidden = false;
-        return;
-      }
-      await reloadDynamic();
-      showToast(`已清除 ${data.deletedEvents} 個團。`);
-      renderAdmin(appEl);
+    btn.addEventListener('click', () => {
+      if (!confirm(`確定要清除全部${label}的團嗎？連同投票、報名紀錄一起刪除，沒辦法復原。`)) return;
+      submitPurge(btn, { scope }, btn.textContent);
     });
   }
-  wirePurgeButton('purge-cancelled-btn', 'cancelled', '已取消');
-  wirePurgeButton('purge-ended-btn', 'ended', '已結束');
+  wirePurgeScopeButton('purge-cancelled-btn', 'cancelled', '已取消');
+  wirePurgeScopeButton('purge-ended-btn', 'ended', '已結束');
+
+  const purgeSelectedBtn = document.getElementById('purge-selected-btn');
+  const purgeCheckboxes = document.querySelectorAll('.purge-event-checkbox');
+  function updatePurgeSelectedBtn() {
+    if (!purgeSelectedBtn) return;
+    const checked = document.querySelectorAll('.purge-event-checkbox:checked').length;
+    purgeSelectedBtn.textContent = `清除勾選的（${checked}）`;
+    purgeSelectedBtn.disabled = checked === 0;
+  }
+  purgeCheckboxes.forEach((cb) => cb.addEventListener('change', updatePurgeSelectedBtn));
+  if (purgeSelectedBtn) {
+    purgeSelectedBtn.addEventListener('click', () => {
+      const ids = [...document.querySelectorAll('.purge-event-checkbox:checked')].map((el) => el.value);
+      if (ids.length === 0) return;
+      if (!confirm(`確定要清除勾選的 ${ids.length} 個團嗎？連同投票、報名紀錄一起刪除，沒辦法復原。`)) return;
+      submitPurge(purgeSelectedBtn, { event_ids: ids }, `清除勾選的（${ids.length}）`);
+    });
+  }
 }

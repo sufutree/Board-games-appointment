@@ -285,37 +285,45 @@ async function reviewTagProposal(req, res) {
   return res.status(200).json({ ok: true });
 }
 
-// 清掉舊的團紀錄（已取消／已結束），連同它的 slots/votes/signups 一起刪，
-// 跟刪除成員/地點/標籤那種「歷史資料留著、只是清單不顯示」不一樣——這裡
-// 是真的物理刪除，因為目的就是清掉測試/雜訊資料，留著沒有意義。
-// 「已結束」的判定跟 js/rules.js 的 isEventEnded() 邏輯一致：已定案
-// （confirmed）而且 confirmed_slot_id 對應的日期已經過了今天。
+// 清掉舊的團紀錄，連同它的 slots/votes/signups 一起刪，跟刪除成員/地點/
+// 標籤那種「歷史資料留著、只是清單不顯示」不一樣——這裡是真的物理刪除，
+// 因為目的就是清掉測試/雜訊資料，留著沒有意義。兩種挑法：
+// - event_ids：後台勾選特定幾個團，指名刪除
+// - scope：批次刪「已取消」／「已結束」／「兩者」，「已結束」判定跟
+//   js/rules.js 的 isEventEnded() 邏輯一致（已定案且 confirmed_slot_id
+//   對應的日期已經過了今天）
 async function purgeEvents(req, res) {
-  const { scope } = req.body || {};
-  if (!['cancelled', 'ended', 'both'].includes(scope)) {
-    return res.status(400).json({ ok: false, error: 'BAD_SCOPE' });
-  }
+  const { scope, event_ids } = req.body || {};
 
-  const [eventsSnap, slotsSnap] = await Promise.all([
-    db.collection('events').get(),
-    db.collection('slots').get(),
-  ]);
-  const slotsById = new Map(slotsSnap.docs.map((d) => [d.id, d.data()]));
+  const slotsSnap = await db.collection('slots').get();
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const targets = eventsSnap.docs.filter((d) => {
-    const e = d.data();
-    if (e.status === 'cancelled') return scope === 'cancelled' || scope === 'both';
-    if (e.status === 'confirmed') {
-      if (scope !== 'ended' && scope !== 'both') return false;
-      const slot = slotsById.get(e.confirmed_slot_id);
-      if (!slot || !slot.date) return false;
-      return new Date(`${slot.date}T00:00:00`) < today;
+  let targets;
+  if (Array.isArray(event_ids) && event_ids.length > 0) {
+    const snaps = await Promise.all(event_ids.map((id) => db.collection('events').doc(String(id)).get()));
+    targets = snaps.filter((d) => d.exists);
+  } else {
+    if (!['cancelled', 'ended', 'both'].includes(scope)) {
+      return res.status(400).json({ ok: false, error: 'BAD_SCOPE' });
     }
-    return false;
-  });
+
+    const eventsSnap = await db.collection('events').get();
+    const slotsById = new Map(slotsSnap.docs.map((d) => [d.id, d.data()]));
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    targets = eventsSnap.docs.filter((d) => {
+      const e = d.data();
+      if (e.status === 'cancelled') return scope === 'cancelled' || scope === 'both';
+      if (e.status === 'confirmed') {
+        if (scope !== 'ended' && scope !== 'both') return false;
+        const slot = slotsById.get(e.confirmed_slot_id);
+        if (!slot || !slot.date) return false;
+        return new Date(`${slot.date}T00:00:00`) < today;
+      }
+      return false;
+    });
+  }
 
   let deletedEvents = 0;
   let deletedSlots = 0;
