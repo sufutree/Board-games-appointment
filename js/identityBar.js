@@ -5,6 +5,7 @@
 import { memberById } from './store.js';
 import { getSelfId, clearSelfId, verifySecret, updateProfile } from './api.js';
 import { escapeHtml, showToast } from './app.js';
+import { pushSupported, notificationPermission, enableNotifications } from './push.js';
 
 let onIdentityChange = null;
 
@@ -28,8 +29,10 @@ function renderHeaderIdentity() {
   const member = selfId ? memberById(selfId) : null;
 
   if (selfId && member) {
+    const showEnableNotif = pushSupported() && notificationPermission() === 'default';
     el.innerHTML = `
       <span>你是：<strong>${escapeHtml(member.name)}</strong></span>
+      ${showEnableNotif ? '<a href="#" id="header-enable-notif-link">開啟通知</a>' : ''}
       <a href="#" id="header-edit-profile-link">修改資訊</a>
       <a href="#" id="header-logout-link">登出</a>
     `;
@@ -43,6 +46,19 @@ function renderHeaderIdentity() {
       e.preventDefault();
       openProfileModal(member);
     });
+    const enableNotifLink = document.getElementById('header-enable-notif-link');
+    if (enableNotifLink) {
+      enableNotifLink.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const result = await enableNotifications();
+        if (!result.ok) {
+          showToast(result.error === 'PERMISSION_DENIED' ? '沒有允許通知權限，之後可以在瀏覽器設定裡重新開啟。' : `開啟通知失敗：${result.error}`);
+          return;
+        }
+        showToast('通知已開啟，之後有人開新團會通知你。');
+        renderHeaderIdentity();
+      });
+    }
     return;
   }
 

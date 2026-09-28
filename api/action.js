@@ -7,6 +7,7 @@ import { db, auth } from './_firebaseAdmin.js';
 import { requireAuth, checkSecret } from './_auth.js';
 import { extractBggId, fetchBggData } from './_bgg.js';
 import { newId, nowIso, formatSlotLabel } from './_ids.js';
+import { notifyOthers } from './_push.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'METHOD_NOT_ALLOWED' });
@@ -81,6 +82,19 @@ async function createEvent(req, res, uid) {
     };
     await db.collection('slots').doc(slotId).set(row);
     slotRows.push(row);
+  }
+
+  // 推播失敗（沒設定 VAPID key、token 過期等）不該讓開團這個動作跟著失敗，
+  // 所以吃掉錯誤，只是不通知而已。
+  try {
+    const creatorSnap = await db.collection('members').doc(uid).get();
+    const creatorName = (creatorSnap.exists && creatorSnap.data().name) || uid;
+    await notifyOthers(uid, {
+      title: '新開的團',
+      body: `${creatorName} 發起了「${eventRow.title || '未命名團'}」`,
+    }, `/#/event/${eventId}`);
+  } catch (err) {
+    console.error('開團推播失敗', err);
   }
 
   return res.status(200).json({ ok: true, event_id: eventId, event: eventRow, slots: slotRows });

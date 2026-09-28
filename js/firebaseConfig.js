@@ -8,3 +8,10 @@ export const firebaseConfig = {
   messagingSenderId: '1080375976690',
   appId: '1:1080375976690:web:d368db6624eb6e7ce9e66b',
 };
+
+// 推播通知（Web Push）要用的 VAPID 公鑰，跟上面的 apiKey 不一樣，沒辦法
+// 用指令生成/查詢，只能手動去 Firebase Console →專案設定→Cloud Messaging
+// 分頁→「Web Push 憑證」→產生金鑰組，把那組「金鑰組」貼在這裡。
+// 沒設定的話 js/push.js 的 enableNotifications() 會直接失敗（不影響其他
+// 功能，只是通知按鈕按了沒反應）。
+export const VAPID_PUBLIC_KEY = 'PASTE_ME';

@@ -2,6 +2,7 @@
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
+import { getMessaging } from 'firebase-admin/messaging';
 
 function loadServiceAccount() {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
@@ -15,3 +16,4 @@ if (!getApps().length) {
 
 export const db = getFirestore();
 export const auth = getAuth();
+export const messaging = getMessaging();
