@@ -142,6 +142,19 @@ async function confirm(req, res, uid) {
   }
   await batch.commit();
 
+  // 跟開團通知一樣：推播失敗不影響定案本身，吃掉錯誤就好。發起人自己
+  // 按的定案，不用通知自己，一樣排除 uid。
+  try {
+    const slotSnap = await db.collection('slots').doc(slot_id).get();
+    const slotLabel = slotSnap.exists ? slotSnap.data().label : '';
+    await notifyOthers(uid, {
+      title: '團定案了',
+      body: `「${event.title || '未命名團'}」定案了${slotLabel ? `，${slotLabel}` : ''}`,
+    }, `/#/event/${event_id}`);
+  } catch (err) {
+    console.error('定案推播失敗', err);
+  }
+
   return res.status(200).json({ ok: true });
 }
 

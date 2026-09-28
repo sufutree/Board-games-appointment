@@ -34,6 +34,7 @@ export default async function handler(req, res) {
   if (op === 'addTag') return addTag(req, res);
   if (op === 'deleteTag') return deleteTag(req, res);
   if (op === 'reviewTagProposal') return reviewTagProposal(req, res);
+  if (op === 'purgeEvents') return purgeEvents(req, res);
 
   return res.status(400).json({ ok: false, error: 'UNKNOWN_OP' });
 }
@@ -282,4 +283,62 @@ async function reviewTagProposal(req, res) {
   }
 
   return res.status(200).json({ ok: true });
+}
+
+// 清掉舊的團紀錄（已取消／已結束），連同它的 slots/votes/signups 一起刪，
+// 跟刪除成員/地點/標籤那種「歷史資料留著、只是清單不顯示」不一樣——這裡
+// 是真的物理刪除，因為目的就是清掉測試/雜訊資料，留著沒有意義。
+// 「已結束」的判定跟 js/rules.js 的 isEventEnded() 邏輯一致：已定案
+// （confirmed）而且 confirmed_slot_id 對應的日期已經過了今天。
+async function purgeEvents(req, res) {
+  const { scope } = req.body || {};
+  if (!['cancelled', 'ended', 'both'].includes(scope)) {
+    return res.status(400).json({ ok: false, error: 'BAD_SCOPE' });
+  }
+
+  const [eventsSnap, slotsSnap] = await Promise.all([
+    db.collection('events').get(),
+    db.collection('slots').get(),
+  ]);
+  const slotsById = new Map(slotsSnap.docs.map((d) => [d.id, d.data()]));
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const targets = eventsSnap.docs.filter((d) => {
+    const e = d.data();
+    if (e.status === 'cancelled') return scope === 'cancelled' || scope === 'both';
+    if (e.status === 'confirmed') {
+      if (scope !== 'ended' && scope !== 'both') return false;
+      const slot = slotsById.get(e.confirmed_slot_id);
+      if (!slot || !slot.date) return false;
+      return new Date(`${slot.date}T00:00:00`) < today;
+    }
+    return false;
+  });
+
+  let deletedEvents = 0;
+  let deletedSlots = 0;
+  let deletedVotesAndSignups = 0;
+  for (const eventDoc of targets) {
+    const eventId = eventDoc.id;
+    const [votesSnap, signupsSnap] = await Promise.all([
+      db.collection('votes').where('event_id', '==', eventId).get(),
+      db.collection('signups').where('event_id', '==', eventId).get(),
+    ]);
+    const eventSlots = slotsSnap.docs.filter((d) => d.data().event_id === eventId);
+
+    const batch = db.batch();
+    batch.delete(db.collection('events').doc(eventId));
+    eventSlots.forEach((d) => batch.delete(d.ref));
+    votesSnap.docs.forEach((d) => batch.delete(d.ref));
+    signupsSnap.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+
+    deletedEvents += 1;
+    deletedSlots += eventSlots.length;
+    deletedVotesAndSignups += votesSnap.size + signupsSnap.size;
+  }
+
+  return res.status(200).json({ ok: true, deletedEvents, deletedSlots, deletedVotesAndSignups });
 }
