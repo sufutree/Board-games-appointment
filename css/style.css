@@ -39,6 +39,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 6px;
   gap: var(--gap);
   padding: 10px 16px;
   background: var(--color-surface);
@@ -49,13 +51,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
   font-weight: 700;
   font-size: 1.1rem;
   color: var(--color-text);
+  white-space: nowrap;
 }
 .brand:hover { text-decoration: none; }
 
 .site-nav {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: 6px;
   gap: 14px;
+}
+.site-nav > a, .site-nav > .btn {
+  white-space: nowrap;
 }
 
 .app {
