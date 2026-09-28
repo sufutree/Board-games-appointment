@@ -14,4 +14,4 @@ export const firebaseConfig = {
 // 分頁→「Web Push 憑證」→產生金鑰組，把那組「金鑰組」貼在這裡。
 // 沒設定的話 js/push.js 的 enableNotifications() 會直接失敗（不影響其他
 // 功能，只是通知按鈕按了沒反應）。
-export const VAPID_PUBLIC_KEY = 'PASTE_ME';
+export const VAPID_PUBLIC_KEY = 'BDnzl54OWt4qxaPH9i4b8O9pmxVDUlYR6644liT9GlLP1aQBUwwBeKsIWVO4X5mX7LzlywYPMLzh9rfpUIi_mLE';
