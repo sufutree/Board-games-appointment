@@ -64,10 +64,17 @@ function parseBggXml(xmlText) {
 
 // 使用者當場等結果，重試次數／間隔都刻意壓低，避免請求拖太久；真的遇到 BGG
 // 排隊中（202）失敗，前端可以請使用者晚點再試一次。
+//
+// BGG 2025 年起把 XML API2 改成註冊制，沒帶 Authorization: Bearer <token>
+// 一律被 Cloudflare 擋掉。BGG_API_TOKEN 是 Vercel 環境變數（跟
+// MASTER_PASSWORD 一樣是敏感資訊，不能寫進原始碼），沒設定的話退回不帶
+// 這個 header 直接打（大概率會被擋，addGame 那邊本來就有手動填欄位的
+// fallback，不會整個掛掉）。
 export async function fetchBggData(bggId) {
   const url = `https://boardgamegeek.com/xmlapi2/thing?id=${bggId}&stats=1`;
+  const headers = process.env.BGG_API_TOKEN ? { Authorization: `Bearer ${process.env.BGG_API_TOKEN}` } : {};
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(url);
+    const res = await fetch(url, { headers });
     if (res.status === 202) {
       await sleep(1500);
       continue;
