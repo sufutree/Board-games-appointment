@@ -55,6 +55,25 @@ export async function loginAs(username, secret) {
   return { ok: true };
 }
 
+// 沒有帳號的玩家自行註冊。跟 loginAs() 同一套模式：/api/action
+// （action: 'register'）換一個自訂權杖，成功就直接變成登入狀態。
+export async function registerAs(name, username, password) {
+  let data;
+  try {
+    const res = await fetch('/api/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'register', name, username, password }),
+    });
+    data = await res.json();
+  } catch {
+    return { ok: false, error: 'NETWORK_ERROR' };
+  }
+  if (!data.ok) return data;
+  await signInWithCustomToken(auth, data.token);
+  return { ok: true };
+}
+
 export async function getIdToken() {
   if (!auth.currentUser) return null;
   return auth.currentUser.getIdToken();

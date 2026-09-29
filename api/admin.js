@@ -35,6 +35,7 @@ export default async function handler(req, res) {
   if (op === 'deleteTag') return deleteTag(req, res);
   if (op === 'reviewTagProposal') return reviewTagProposal(req, res);
   if (op === 'purgeEvents') return purgeEvents(req, res);
+  if (op === 'deleteGame') return deleteGame(req, res);
 
   return res.status(400).json({ ok: false, error: 'UNKNOWN_OP' });
 }
@@ -349,4 +350,24 @@ async function purgeEvents(req, res) {
   }
 
   return res.status(200).json({ ok: true, deletedEvents, deletedSlots, deletedVotesAndSignups });
+}
+
+// 刪除新增錯誤的遊戲。連同這款遊戲在所有人（成員或場地）收藏裡的紀錄
+// 一起清掉，不然刪了遊戲本身、收藏那邊卻還留著一筆指到不存在的遊戲，
+// 畫面上會變成「未知遊戲 (id)」，比留著更讓人困惑。不動任何團的
+// game_bgg_ids（歷史事件紀錄不動，跟刪除成員/地點是同一種取捨）。
+async function deleteGame(req, res) {
+  const { bgg_id } = req.body || {};
+  if (bgg_id === undefined || bgg_id === null || bgg_id === '') {
+    return res.status(400).json({ ok: false, error: 'MISSING_BGG_ID' });
+  }
+  const id = String(bgg_id);
+
+  const collectionsSnap = await db.collection('collections').where('bgg_id', '==', Number(id)).get();
+  const batch = db.batch();
+  batch.delete(db.collection('games').doc(id));
+  collectionsSnap.docs.forEach((d) => batch.delete(d.ref));
+  await batch.commit();
+
+  return res.status(200).json({ ok: true, deletedCollections: collectionsSnap.size });
 }

@@ -14,6 +14,7 @@ export default async function handler(req, res) {
   const { action } = req.body || {};
 
   if (action === 'login') return login(req, res);
+  if (action === 'register') return register(req, res);
 
   // 其餘動作都要求先登入。
   const uid = await requireAuth(req, res);
@@ -46,6 +47,30 @@ async function login(req, res) {
   if (!ok) return res.status(200).json({ ok: false, error: 'BAD_SECRET' });
 
   const token = await auth.createCustomToken(String(member_id));
+  return res.status(200).json({ ok: true, token });
+}
+
+// 沒有帳號的玩家自行註冊，不需要主密碼（原本只有 admin 後台的 addMember
+// 能新增成員）。member_id 沿用「顯示姓名當識別碼」的既有規則，跟 admin
+// 後台新增成員是同一套邏輯，只是這裡任何人都能自己做。註冊成功直接發
+// 登入權杖，跟 login() 一樣讓前端能立刻換成登入狀態，不用再登入一次。
+async function register(req, res) {
+  const { name, username, password } = req.body || {};
+  const id = String(name || '').trim();
+  if (!id) return res.status(400).json({ ok: false, error: 'MISSING_NAME' });
+  const uname = String(username || '').trim();
+  if (!uname) return res.status(400).json({ ok: false, error: 'MISSING_USERNAME' });
+
+  const existing = await db.collection('members').doc(id).get();
+  if (existing.exists) return res.status(409).json({ ok: false, error: 'ALREADY_EXISTS' });
+  const existingUsername = await db.collection('usernames').doc(uname).get();
+  if (existingUsername.exists) return res.status(409).json({ ok: false, error: 'USERNAME_TAKEN' });
+
+  await db.collection('members').doc(id).set({ id, name: id, username: uname, type: 'person', active: true });
+  await db.collection('member_secrets').doc(id).set({ password: password || '' });
+  await db.collection('usernames').doc(uname).set({ member_id: id });
+
+  const token = await auth.createCustomToken(id);
   return res.status(200).json({ ok: true, token });
 }
 

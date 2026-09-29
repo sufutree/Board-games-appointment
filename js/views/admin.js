@@ -3,7 +3,7 @@
 // 登入身分無關，所以不放進主導覽列，知道網址（#/admin）的人才會用到。
 import { collection, query, where, getDocs } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { store, activeMembers, activeVenues, reloadDynamic, getGameMeta, tagGroups, tagLabel } from '../store.js';
-import { isEventEnded } from '../rules.js';
+import { isEventEnded, allGamesWithHolders } from '../rules.js';
 import { db } from '../firebase.js';
 import { escapeHtml, showToast } from '../app.js';
 
@@ -72,6 +72,7 @@ export async function renderAdmin(appEl) {
   const purgeCandidates = store.events
     .filter((e) => e.status === 'cancelled' || (e.status === 'confirmed' && isEventEnded(e, store.slots)))
     .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  const allGamesList = allGamesWithHolders();
 
   appEl.innerHTML = `
     <h1 class="page-title">管理</h1>
@@ -298,6 +299,23 @@ export async function renderAdmin(appEl) {
         <button type="button" id="purge-selected-btn" class="btn btn-danger btn-sm" style="margin-top:8px;" disabled>清除勾選的（0）</button>
       ` : ''}
       <p id="purge-events-error" class="error-text" hidden></p>
+    </div>
+
+    <div class="card">
+      <div class="section-title">刪除遊戲</div>
+      <p class="card-meta">刪掉新增錯誤的遊戲，連同這款遊戲在所有人收藏裡的紀錄一起清掉，沒辦法復原。</p>
+      <div class="form-group">
+        <label class="form-label" for="delete-game-search">搜尋</label>
+        <input class="form-control" id="delete-game-search" placeholder="輸入名稱篩選">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="delete-game-select">遊戲</label>
+        <select class="form-control" id="delete-game-select" size="8">
+          ${allGamesList.map((g) => `<option value="${g.bggId}">${escapeHtml(g.meta.name_zh || g.meta.name_en || String(g.bggId))}</option>`).join('')}
+        </select>
+      </div>
+      <p id="delete-game-error" class="error-text" hidden></p>
+      <button type="button" id="delete-game-btn" class="btn btn-danger btn-sm">刪除</button>
     </div>
   `;
 
@@ -767,6 +785,57 @@ export async function renderAdmin(appEl) {
       if (ids.length === 0) return;
       if (!confirm(`確定要清除勾選的 ${ids.length} 個團嗎？連同投票、報名紀錄一起刪除，沒辦法復原。`)) return;
       submitPurge(purgeSelectedBtn, { event_ids: ids }, `清除勾選的（${ids.length}）`);
+    });
+  }
+
+  const deleteGameSearch = document.getElementById('delete-game-search');
+  const deleteGameSelect = document.getElementById('delete-game-select');
+  if (deleteGameSearch && deleteGameSelect) {
+    deleteGameSearch.addEventListener('input', () => {
+      const kw = deleteGameSearch.value.trim().toLowerCase();
+      [...deleteGameSelect.options].forEach((opt) => {
+        opt.hidden = kw.length > 0 && !opt.textContent.toLowerCase().includes(kw);
+      });
+    });
+  }
+
+  const deleteGameBtn = document.getElementById('delete-game-btn');
+  if (deleteGameBtn) {
+    deleteGameBtn.addEventListener('click', async () => {
+      const errorEl = document.getElementById('delete-game-error');
+      errorEl.hidden = true;
+      const option = deleteGameSelect.selectedOptions[0];
+      if (!option) {
+        errorEl.textContent = '請先選一款遊戲。';
+        errorEl.hidden = false;
+        return;
+      }
+      const bggId = option.value;
+      if (!confirm(`確定要刪除「${option.textContent}」嗎？連同所有人收藏裡的這筆紀錄一起刪除，沒辦法復原。`)) return;
+
+      deleteGameBtn.disabled = true;
+      deleteGameBtn.textContent = '處理中…';
+      let data;
+      try {
+        const res = await fetch('/api/admin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ master_password: masterInput.value, op: 'deleteGame', bgg_id: bggId }),
+        });
+        data = await res.json();
+      } catch {
+        data = { ok: false, error: 'NETWORK_ERROR' };
+      }
+      deleteGameBtn.disabled = false;
+      deleteGameBtn.textContent = '刪除';
+      if (!data.ok) {
+        errorEl.textContent = ADMIN_ERROR_LABELS[data.error] || `刪除失敗：${data.error}`;
+        errorEl.hidden = false;
+        return;
+      }
+      await reloadDynamic();
+      showToast(`已刪除「${option.textContent}」。`);
+      renderAdmin(appEl);
     });
   }
 }

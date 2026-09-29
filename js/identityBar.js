@@ -3,7 +3,7 @@
 // 中間打斷操作的做法，也取代「點名字再輸密碼」——現在是正規的帳號＋密碼
 // 表單，一次送出。
 import { memberById } from './store.js';
-import { getSelfId, clearSelfId, verifySecret, updateProfile } from './api.js';
+import { getSelfId, clearSelfId, verifySecret, updateProfile, registerNewMember } from './api.js';
 import { escapeHtml, showToast } from './app.js';
 import { pushSupported, notificationPermission, enableNotifications } from './push.js';
 
@@ -88,6 +88,7 @@ export function openIdentityModal() {
     const errorEl = document.getElementById('login-error');
     const cancelBtn = document.getElementById('identity-modal-cancel');
     const submitBtn = document.getElementById('identity-modal-submit');
+    const registerLink = document.getElementById('open-register-link');
 
     usernameInput.value = '';
     passwordInput.value = '';
@@ -101,6 +102,7 @@ export function openIdentityModal() {
       submitBtn.removeEventListener('click', onSubmit);
       usernameInput.removeEventListener('keydown', onKeydown);
       passwordInput.removeEventListener('keydown', onKeydown);
+      registerLink.removeEventListener('click', onOpenRegister);
     }
     function onCancel() {
       cleanup();
@@ -134,11 +136,93 @@ export function openIdentityModal() {
       if (onIdentityChange) onIdentityChange();
       resolve(true);
     }
+    function onOpenRegister(e) {
+      e.preventDefault();
+      cleanup();
+      openRegisterModal().then(resolve);
+    }
 
     cancelBtn.addEventListener('click', onCancel);
     submitBtn.addEventListener('click', onSubmit);
     usernameInput.addEventListener('keydown', onKeydown);
     passwordInput.addEventListener('keydown', onKeydown);
+    registerLink.addEventListener('click', onOpenRegister);
+  });
+}
+
+// 彈出「註冊」視窗：沒有帳號的玩家自己建立一個。回傳 Promise<boolean>，
+// 邏輯跟 openIdentityModal() 一致（true＝現在已經是登入狀態）——兩個
+// 視窗互相有「還沒有帳號？註冊」／「已經有帳號？登入」的切換連結，用
+// resolve 互相串起來，切過去的那邊處理好之後才算數。
+function openRegisterModal() {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('register-modal');
+    const nameInput = document.getElementById('register-name');
+    const usernameInput = document.getElementById('register-username');
+    const passwordInput = document.getElementById('register-password');
+    const errorEl = document.getElementById('register-error');
+    const cancelBtn = document.getElementById('register-modal-cancel');
+    const submitBtn = document.getElementById('register-modal-submit');
+    const loginLink = document.getElementById('open-login-link');
+
+    nameInput.value = '';
+    usernameInput.value = '';
+    passwordInput.value = '';
+    errorEl.hidden = true;
+    overlay.hidden = false;
+    nameInput.focus();
+
+    function cleanup() {
+      overlay.hidden = true;
+      cancelBtn.removeEventListener('click', onCancel);
+      submitBtn.removeEventListener('click', onSubmit);
+      loginLink.removeEventListener('click', onOpenLogin);
+    }
+    function onCancel() {
+      cleanup();
+      resolve(false);
+    }
+    async function onSubmit() {
+      const name = nameInput.value.trim();
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value;
+      if (!name) {
+        errorEl.textContent = '請輸入顯示姓名。';
+        errorEl.hidden = false;
+        return;
+      }
+      if (!username) {
+        errorEl.textContent = '請輸入帳號。';
+        errorEl.hidden = false;
+        return;
+      }
+      errorEl.hidden = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = '註冊中…';
+      const result = await registerNewMember(name, username, password);
+      submitBtn.disabled = false;
+      submitBtn.textContent = '註冊';
+      if (!result.ok) {
+        errorEl.textContent = result.error === 'ALREADY_EXISTS' ? '已經有同名的人了，換一個顯示姓名。'
+          : result.error === 'USERNAME_TAKEN' ? '這個帳號已經有人用了。'
+          : `註冊失敗：${result.error}`;
+        errorEl.hidden = false;
+        return;
+      }
+      cleanup();
+      renderHeaderIdentity();
+      if (onIdentityChange) onIdentityChange();
+      resolve(true);
+    }
+    function onOpenLogin(e) {
+      e.preventDefault();
+      cleanup();
+      openIdentityModal().then(resolve);
+    }
+
+    cancelBtn.addEventListener('click', onCancel);
+    submitBtn.addEventListener('click', onSubmit);
+    loginLink.addEventListener('click', onOpenLogin);
   });
 }
 

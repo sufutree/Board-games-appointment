@@ -15,7 +15,7 @@
 // 錯誤訊息。呼叫端要先自己用 identityBar.js 的 requireSelfId() 確保已登入，
 // 這裡不再自動跳登入視窗（避免循環 import：identityBar.js 已經依賴這個檔案）。
 import { doc, collection, setDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
-import { db, loginAs, getIdToken, getSelfId } from './firebase.js';
+import { db, loginAs, registerAs, getIdToken, getSelfId } from './firebase.js';
 import { memberById, reloadDynamic } from './store.js';
 
 export { getSelfId, clearSelfId } from './firebase.js';
@@ -23,6 +23,14 @@ export { getSelfId, clearSelfId } from './firebase.js';
 // 帳號＋密碼登入。
 export async function verifySecret(username, secret) {
   return loginAs(username, secret);
+}
+
+// 沒有帳號的玩家自行註冊，成功後重新載入 store 讓新成員馬上出現在
+// 名單裡（例如選發起人、勾開放名單這些地方）。
+export async function registerNewMember(name, username, password) {
+  const result = await registerAs(name, username, password);
+  if (result.ok) await reloadDynamic();
+  return result;
 }
 
 // 自己改自己的顯示姓名／帳號／密碼，欄位都選填（沒填就不動），但要再輸入
