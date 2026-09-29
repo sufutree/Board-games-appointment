@@ -7,6 +7,7 @@ import { renderNewEvent } from './views/newEvent.js';
 import { renderEvent } from './views/event.js';
 import { renderGames } from './views/games.js';
 import { renderAdmin } from './views/admin.js';
+import { renderTools } from './views/tools.js';
 import { pushSupported, notificationPermission, listenForegroundMessages } from './push.js';
 
 const appEl = document.getElementById('app');
@@ -19,6 +20,21 @@ export function showToast(msg) {
   showToast._t = setTimeout(() => { el.hidden = true; }, 2600);
 }
 
+// bootstrap 是否已經失敗過。用旗標而不是看 store.loadError，因為在 loadAll
+// 之前就掛掉（例如 Firebase Auth 連不上）時 loadError 還是空的。
+let bootFailed = false;
+
+// 換頁時要收掉的東西（計時器的 interval、螢幕恆亮的 wake lock 之類）。
+// 只有桌邊小工具會用到——其他頁面都是畫完就沒有背景活動。
+let viewCleanup = null;
+export function onViewCleanup(fn) { viewCleanup = fn; }
+function runViewCleanup() {
+  if (!viewCleanup) return;
+  const fn = viewCleanup;
+  viewCleanup = null;
+  try { fn(); } catch (err) { console.error(err); }
+}
+
 function renderLoading() {
   appEl.innerHTML = `<div class="loading">載入中，請稍候…</div>`;
 }
@@ -27,7 +43,11 @@ function renderLoadError() {
   appEl.innerHTML = `
     <div class="error-state">
       <p>資料載入失敗，請檢查網路連線。</p>
-      <div class="retry-row"><button id="retry-load" class="btn btn-primary">重試</button></div>
+      <p class="card-meta">桌邊小工具不需要網路，可以直接用。</p>
+      <div class="retry-row">
+        <button id="retry-load" class="btn btn-primary">重試</button>
+        <a class="btn" href="#/tools">開小工具</a>
+      </div>
     </div>
   `;
   document.getElementById('retry-load').addEventListener('click', boot);
@@ -41,13 +61,22 @@ function parseRoute() {
   if (parts[0] === 'new') return { view: 'new' };
   if (parts[0] === 'games') return { view: 'games' };
   if (parts[0] === 'admin') return { view: 'admin' };
+  if (parts[0] === 'tools') return { view: 'tools', id: parts[1] || null };
   if (parts[0] === 'event' && parts[1]) return { view: 'event', id: parts[1] };
   return { view: 'home' };
 }
 
 export async function router() {
-  if (!store.loaded) return;
   const route = parseRoute();
+
+  // 小工具全部是純本機的（不讀寫 Firestore），所以 bootstrap 失敗——現場
+  // 網路爛的時候——照樣要能開。其他頁面沒有資料就真的沒東西可顯示。
+  if (!store.loaded && route.view !== 'tools') {
+    if (bootFailed) renderLoadError();
+    return;
+  }
+
+  runViewCleanup();
   window.scrollTo(0, 0);
   try {
     if (route.view === 'home') await renderHome(appEl);
@@ -55,6 +84,7 @@ export async function router() {
     else if (route.view === 'event') await renderEvent(appEl, route.id);
     else if (route.view === 'games') await renderGames(appEl);
     else if (route.view === 'admin') await renderAdmin(appEl);
+    else if (route.view === 'tools') await renderTools(appEl, route.id);
     else await renderHome(appEl);
   } catch (err) {
     console.error(err);
@@ -92,7 +122,11 @@ async function boot() {
     }
   } catch (err) {
     console.error(err);
-    renderLoadError();
+    bootFailed = true;
+    // 停在小工具頁（或直接用捷徑開進來）的話就照樣畫出來，不要被
+    // 載入失敗的畫面蓋掉——桌邊要用的就是這幾個工具。
+    if (parseRoute().view === 'tools') await router();
+    else renderLoadError();
   }
 }
 
